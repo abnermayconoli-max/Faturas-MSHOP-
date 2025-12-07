@@ -1,72 +1,56 @@
 from datetime import date
-from typing import List, Optional
 import os
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Date, Numeric
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+)
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
-# ==========================
-# CONFIGURAÇÃO DO BANCO
-# ==========================
 
-# Render: vamos ler a URL do banco da variável de ambiente DATABASE_URL
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./test.db")
+# =========================
+# CONFIG BANCO DE DADOS
+# =========================
 
-# Se for SQLite (local), precisa do connect_args; no Render será Postgres e não entra nesse if
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL, connect_args={"check_same_thread": False}
-    )
-else:
-    engine = create_engine(DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+if not DATABASE_URL:
+    # Isso ajuda a ver erro nos logs do Render se a variável não estiver setada
+    raise RuntimeError("DATABASE_URL não configurada nas variáveis de ambiente do Render.")
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-# ==========================
-# MODELO ORM (SQLAlchemy)
-# ==========================
+# =========================
+# MODELO SQLALCHEMY (TABELA)
+# =========================
 
-class FaturaORM(Base):
+class FaturaDB(Base):
     __tablename__ = "faturas"
 
     id = Column(Integer, primary_key=True, index=True)
-    transportadora = Column(String, nullable=False)
-    numero_fatura = Column(String, nullable=False)
-    valor = Column(Numeric(10, 2), nullable=False)
-    data_vencimento = Column(Date, nullable=False)
-    status = Column(String, nullable=False, default="pendente")
+    transportadora = Column(String, index=True)
+    numero_fatura = Column(String, index=True)
+    valor = Column(Numeric(10, 2))
+    data_vencimento = Column(Date)
+    status = Column(String, default="pendente")
 
 
-# Cria as tabelas no banco (se ainda não existirem)
+# Cria a tabela se ainda não existir
 Base.metadata.create_all(bind=engine)
 
 
-# ==========================
-# APP FASTAPI
-# ==========================
-
-app = FastAPI(
-    title="Sistema de Faturas Transportadoras",
-    version="0.2.0",
-)
-
-
-# Dependency: abrir e fechar sessão do banco a cada request
-def get_db() -> Session:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# ==========================
+# =========================
 # MODELOS Pydantic (entrada/saída)
-# ==========================
+# =========================
 
 class FaturaBase(BaseModel):
     transportadora: str
@@ -80,20 +64,38 @@ class FaturaCreate(FaturaBase):
     pass
 
 
-class Fatura(FaturaBase):
+class FaturaOut(FaturaBase):
     id: int
 
     class Config:
         orm_mode = True
 
 
-# ==========================
-# ROTAS
-# ==========================
+# =========================
+# DEPENDÊNCIA DO BANCO
+# =========================
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# =========================
+# APP FASTAPI
+# =========================
+
+app = FastAPI(
+    title="Sistema de Faturas Transportadoras",
+    version="0.2.0",
+)
+
 
 @app.get("/")
 def read_root():
-    return {"mensagem": "API de Faturas com banco de dados!"}
+    return {"mensagem": "API de Faturas com banco PostgreSQL no Render!"}
 
 
 @app.get("/health")
@@ -101,12 +103,13 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.post("/faturas", response_model=Fatura)
+# =========================
+# ROTAS DE FATURAS
+# =========================
+
+@app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
-    """
-    Cria uma nova fatura no banco de dados.
-    """
-    db_fatura = FaturaORM(
+    db_fatura = FaturaDB(
         transportadora=fatura.transportadora,
         numero_fatura=fatura.numero_fatura,
         valor=fatura.valor,
@@ -119,10 +122,15 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     return db_fatura
 
 
-@app.get("/faturas", response_model=List[Fatura])
+@app.get("/faturas", response_model=list[FaturaOut])
 def listar_faturas(db: Session = Depends(get_db)):
-    """
-    Lista todas as faturas cadastradas no banco.
-    """
-    faturas = db.query(FaturaORM).all()
+    faturas = db.query(FaturaDB).order_by(FaturaDB.id).all()
     return faturas
+
+
+@app.get("/faturas/{fatura_id}", response_model=FaturaOut)
+def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
+    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
+    if not fatura:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+    return fatura
