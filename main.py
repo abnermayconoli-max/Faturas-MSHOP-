@@ -1,54 +1,35 @@
 from datetime import date
+from typing import List
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.1.0",
+    version="0.2.0",
 )
 
+# ==== MODELOS (Pydantic) ====
 
-# ===== MODELO (Pydantic) =====
-class Fatura(BaseModel):
-    id: int
+class FaturaBase(BaseModel):
     transportadora: str
-    numero_fatura: str
     valor: float
     data_vencimento: date
-    status: str  # pendente, atrasada, paga, etc.
+    status: str = "pendente"  # pendente, paga, atrasada etc.
 
 
-# ===== DADOS DE EXEMPLO (por enquanto só mock, sem banco) =====
-faturas_mock = [
-    Fatura(
-        id=1,
-        transportadora="DHL",
-        numero_fatura="DHL-2025-001",
-        valor=1520.75,
-        data_vencimento=date(2025, 12, 20),
-        status="pendente",
-    ),
-    Fatura(
-        id=2,
-        transportadora="Transbritto",
-        numero_fatura="TB-98765",
-        valor=980.40,
-        data_vencimento=date(2025, 12, 10),
-        status="atrasada",
-    ),
-    Fatura(
-        id=3,
-        transportadora="Garcia",
-        numero_fatura="GC-12345",
-        valor=2500.00,
-        data_vencimento=date(2025, 12, 25),
-        status="programada",
-    ),
-]
+class Fatura(FaturaBase):
+    id: int
 
 
-# ===== ROTAS =====
+# ==== "BANCO" EM MEMÓRIA TEMPORÁRIO ====
+
+_faturas_db: List[Fatura] = []
+_proximo_id: int = 1
+
+
+# ==== ROTAS PRINCIPAIS ====
+
 @app.get("/")
 def read_root():
     return {"mensagem": "API de Faturas no ar a partir do Render!"}
@@ -59,10 +40,18 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/faturas", response_model=list[Fatura])
+@app.get("/faturas", response_model=List[Fatura])
 def listar_faturas():
-    """
-    Lista todas as faturas de exemplo (depois vamos trocar para banco de dados).
-    """
-    return faturas_mock
+    """Lista todas as faturas (por enquanto só em memória)."""
+    return _faturas_db
 
+
+@app.post("/faturas", response_model=Fatura)
+def criar_fatura(fatura: FaturaBase):
+    """Cria uma nova fatura (ainda sem banco de dados real)."""
+    global _proximo_id
+
+    nova_fatura = Fatura(id=_proximo_id, **fatura.dict())
+    _proximo_id += 1
+    _faturas_db.append(nova_fatura)
+    return nova_fatura
