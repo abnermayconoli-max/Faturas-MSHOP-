@@ -1,18 +1,19 @@
 from datetime import date
-from typing import List
+from typing import List, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.2.0",
+    version="0.1.0",
 )
 
-# ==== MODELOS (Pydantic) ====
+# ===== MODELOS (Pydantic) =====
 
 class FaturaBase(BaseModel):
     transportadora: str
+    numero_fatura: str
     valor: float
     data_vencimento: date
     status: str = "pendente"  # pendente, paga, atrasada etc.
@@ -22,13 +23,11 @@ class Fatura(FaturaBase):
     id: int
 
 
-# ==== "BANCO" EM MEMÓRIA TEMPORÁRIO ====
-
-_faturas_db: List[Fatura] = []
-_proximo_id: int = 1
+# "Banco de dados" em memória (por enquanto)
+FATURAS_DB: List[Fatura] = []
 
 
-# ==== ROTAS PRINCIPAIS ====
+# ===== ENDPOINTS BÁSICOS =====
 
 @app.get("/")
 def read_root():
@@ -40,18 +39,31 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.get("/faturas", response_model=List[Fatura])
-def listar_faturas():
-    """Lista todas as faturas (por enquanto só em memória)."""
-    return _faturas_db
-
-
+# ---- Criar fatura ----
 @app.post("/faturas", response_model=Fatura)
-def criar_fatura(fatura: FaturaBase):
-    """Cria uma nova fatura (ainda sem banco de dados real)."""
-    global _proximo_id
-
-    nova_fatura = Fatura(id=_proximo_id, **fatura.dict())
-    _proximo_id += 1
-    _faturas_db.append(nova_fatura)
+def criar_fatura(dados: FaturaBase):
+    novo_id = len(FATURAS_DB) + 1
+    nova_fatura = Fatura(id=novo_id, **dados.dict())
+    FATURAS_DB.append(nova_fatura)
     return nova_fatura
+
+
+# ---- Listar faturas ----
+@app.get("/faturas", response_model=List[Fatura])
+def listar_faturas(status: Optional[str] = None):
+    """
+    Lista todas as faturas.
+    Se passar ?status=pendente, filtra só por esse status.
+    """
+    if status:
+        return [f for f in FATURAS_DB if f.status == status]
+    return FATURAS_DB
+
+
+# ---- Buscar fatura por ID (opcional mas útil) ----
+@app.get("/faturas/{fatura_id}", response_model=Fatura)
+def obter_fatura(fatura_id: int):
+    for f in FATURAS_DB:
+        if f.id == fatura_id:
+            return f
+    raise HTTPException(status_code=404, detail="Fatura não encontrada")
