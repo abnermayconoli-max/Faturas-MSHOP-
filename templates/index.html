@@ -1,86 +1,250 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>Sistema de Faturas Transportadoras</title>
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #0b0b15;
+        color: #f5f5f5;
+        margin: 0;
+        padding: 0;
+      }
+
+      header {
+        background: #5b21b6;
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 20px;
+      }
+
+      header span {
+        font-size: 12px;
+        opacity: 0.8;
+      }
+
+      main {
+        padding: 24px;
+        max-width: 1100px;
+        margin: 0 auto;
+      }
+
+      .cards {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+
+      .card {
+        background: #111827;
+        border-radius: 8px;
+        padding: 16px;
+        flex: 1;
+        min-width: 200px;
+        box-shadow: 0 0 0 1px #1f2933;
+      }
+
+      .card h2 {
+        margin: 0 0 8px 0;
+        font-size: 16px;
+      }
+
+      .card p {
+        margin: 4px 0;
+        font-size: 14px;
+      }
+
+      .form-container {
+        background: #111827;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 0 0 1px #1f2933;
+      }
+
+      .form-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .form-group {
+        flex: 1;
+        min-width: 160px;
+      }
+
+      label {
+        display: block;
+        font-size: 12px;
+        margin-bottom: 4px;
+        color: #9ca3af;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 8px;
+        border-radius: 4px;
+        border: 1px solid #374151;
+        background: #020617;
+        color: #f9fafb;
+        box-sizing: border-box;
+      }
+
+      button {
+        border: none;
+        border-radius: 4px;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      .btn-primary {
+        background: #7c3aed;
+        color: #fff;
+      }
+
+      .btn-secondary {
+        background: #374151;
+        color: #f9fafb;
+      }
+
+      .btn-danger {
+        background: #b91c1c;
+        color: #fff;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #020617;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      thead {
+        background: #111827;
+      }
+
+      th,
+      td {
+        padding: 8px 10px;
+        font-size: 13px;
+        border-bottom: 1px solid #1f2937;
+        text-align: left;
+      }
+
+      th {
+        font-weight: 600;
+        color: #d1d5db;
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      .status-badge {
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .status-pendente {
+        background: #451a03;
+        color: #fdba74;
+      }
+
+      .status-pago {
+        background: #022c22;
+        color: #6ee7b7;
+      }
+
+      .status-cancelado {
+        background: #4a044e;
+        color: #f9a8d4;
+      }
+
+      .actions button {
+        margin-right: 4px;
+        margin-bottom: 4px;
+      }
+
+      .filters {
+        margin-bottom: 12px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .small {
+        font-size: 12px;
+        color: #9ca3af;
+      }
+
+      @media (max-width: 768px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 4px;
+        }
+      }
+    </style>
+  </head>
+  <body>
     <header>
-        <h1>Sistema de Faturas Transportadoras</h1>
-        <p>Painel simples de contas a pagar</p>
+      <div>
+        <h1>Faturas - MSHOP</h1>
+        <span>Sistema simples de contas a pagar (FastAPI + PostgreSQL)</span>
+      </div>
+      <div class="small">
+        Status da API:
+        <span id="api-status">...</span>
+      </div>
     </header>
 
     <main>
-        <section class="card">
-            <h2>Cadastrar nova fatura</h2>
-            <form id="form-fatura">
-                <div class="grid">
-                    <label>
-                        Transportadora
-                        <input type="text" id="transportadora" required>
-                    </label>
-                    <label>
-                        Nº Fatura
-                        <input type="text" id="numero_fatura" required>
-                    </label>
-                    <label>
-                        Valor (R$)
-                        <input type="number" id="valor" step="0.01" required>
-                    </label>
-                    <label>
-                        Data vencimento
-                        <input type="date" id="data_vencimento" required>
-                    </label>
-                    <label>
-                        Status
-                        <select id="status">
-                            <option value="pendente">Pendente</option>
-                            <option value="pago">Pago</option>
-                            <option value="aguardando_baixa">Aguardando baixa</option>
-                        </select>
-                    </label>
-                </div>
-                <button type="submit">Salvar Fatura</button>
-            </form>
-            <p id="mensagem"></p>
-        </section>
+      <section class="cards">
+        <article class="card">
+          <h2>Resumo</h2>
+          <p>Total de faturas: <strong id="kpi-total">0</strong></p>
+          <p>Valor total: <strong id="kpi-valor-total">R$ 0,00</strong></p>
+        </article>
+        <article class="card">
+          <h2>Status</h2>
+          <p>Pendentes: <strong id="kpi-pendentes">0</strong></p>
+          <p>Atrasadas: <strong id="kpi-atrasadas">0</strong></p>
+        </article>
+      </section>
 
-        <section class="card">
-            <div class="card-header">
-                <h2>Lista de faturas</h2>
-                <div class="filtros">
-                    <button data-filtro="todas" class="btn-filtro ativo">Todas</button>
-                    <button data-filtro="pendente" class="btn-filtro">Pendentes</button>
-                    <button data-filtro="pago" class="btn-filtro">Pagas</button>
-                    <button data-filtro="atrasadas" class="btn-filtro">Atrasadas</button>
-                </div>
+      <section class="form-container">
+        <h2 style="margin-top:0;margin-bottom:12px;font-size:16px;">
+          Nova Fatura
+        </h2>
+        <form id="form-fatura">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="transportadora">Transportadora</label>
+              <input id="transportadora" name="transportadora" required />
             </div>
-
-            <table id="tabela-faturas">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Transportadora</th>
-                        <th>Nº Fatura</th>
-                        <th>Valor</th>
-                        <th>Vencimento</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <!-- linhas preenchidas via JS -->
-                </tbody>
-            </table>
-        </section>
-    </main>
-
-    <footer>
-        <small>Feito por Abner • FastAPI + PostgreSQL</small>
-    </footer>
-
-    <script src="/static/script.js"></script>
-</body>
-</html>
-
+            <div class="form-group">
+              <label for="numero_fatura">Número da Fatura</label>
+              <input id="numero_fatura" name="numero_fatura" required />
+            </div>
+            <div class="form-group">
+              <label for="valor">Valor (R$)</label>
+              <input
+                id="valor"
+                name="valor"
+                type="number"
