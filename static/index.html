@@ -3,427 +3,118 @@
 <head>
   <meta charset="UTF-8" />
   <title>Faturas MSHOP</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { background: #f3f7f6; color: #123; }
-    header { background: #21a45a; color: #fff; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
-    header h1 { font-size: 24px; font-weight: 700; }
-    nav button { background: transparent; border: none; color: #e3f5eb; margin-left: 16px; font-size: 16px; cursor: pointer; padding-bottom: 4px; border-bottom: 2px solid transparent; }
-    nav button.ativo { border-color: #fff; color: #fff; }
-    main { max-width: 1200px; margin: 24px auto 40px; padding: 0 16px; }
-    h2 { font-size: 22px; margin-bottom: 16px; }
-    .card { background: #ffffff; border-radius: 12px; padding: 20px 24px; box-shadow: 0 8px 20px rgba(0,0,0,0.04); margin-bottom: 24px; }
-    .linha { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
-    label { font-size: 14px; margin-bottom: 4px; display: block; }
-    input[type="text"], input[type="number"], input[type="date"], select { padding: 8px 10px; border-radius: 8px; border: 1px solid #cfd9d4; width: 100%; }
-    input:focus, select:focus { outline: none; border-color: #21a45a; box-shadow: 0 0 0 2px rgba(33,164,90,0.18); }
-    .btn { background: #21a45a; color: #fff; border: none; border-radius: 999px; padding: 9px 18px; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-    .btn.secundario { background: #e7f3ec; color: #1c7c48; }
-    .btn.perigo { background: #e55353; }
-    .btn + .btn { margin-left: 8px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
-    thead { background: #e7f3ec; }
-    th, td { padding: 8px 10px; border-bottom: 1px solid #edf2f0; text-align: left; }
-    tr:hover td { background: #f7fbf9; }
-    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-    .badge.pendente { background: #fff4cc; color: #946200; }
-    .badge.atrasada { background: #ffe0e0; color: #9b1c1c; }
-    .badge.em-dia, .badge.paga { background: #d8f5df; color: #136533; }
-    .hidden { display: none; }
-    .cards-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 16px; }
-    .card-dashboard { background: #f5fbf7; border-radius: 14px; padding: 16px 18px; border: 1px solid #d4ecdf; }
-    .card-dashboard h3 { font-size: 16px; margin-bottom: 8px; color: #335; }
-    .card-dashboard .valor { font-size: 22px; font-weight: 700; margin-bottom: 4px; color: #136533; }
-    .card-dashboard .quantidade { font-size: 13px; color: #667; }
-    .acoes-linha { position: relative; }
-    .menu-pontos { position: absolute; right: 0; top: 24px; background: #fff; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); padding: 6px 0; min-width: 160px; z-index: 10; }
-    .menu-pontos button { width: 100%; background: transparent; border: none; text-align: left; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-    .menu-pontos button:hover { background: #f2f8f5; }
-    .texto-menor { font-size: 13px; color: #555; margin-top: 4px; }
-  </style>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
-    <h1>Faturas MSHOP</h1>
-    <nav>
-      <button id="btn-aba-faturas" class="ativo" onclick="abrirAba('faturas')">Faturas</button>
-      <button id="btn-aba-cadastro" onclick="abrirAba('cadastro')">Cadastro</button>
-      <button id="btn-aba-dashboard" onclick="abrirAba('dashboard')">Dashboard</button>
+  <header class="topbar">
+    <div class="logo">Faturas MSHOP</div>
+    <nav class="menu">
+      <button data-tab="faturas" class="tab-button active">Faturas</button>
+      <button data-tab="cadastro" class="tab-button">Cadastro</button>
+      <button data-tab="dashboard" class="tab-button">Dashboard</button>
     </nav>
   </header>
 
   <main>
     <!-- ABA FATURAS -->
-    <section id="aba-faturas">
-      <div class="card">
-        <h2>Lista de Faturas</h2>
-        <div class="linha">
-          <div style="flex: 1 1 260px;">
-            <label for="filtro-transportadora">Transportadora</label>
-            <input id="filtro-transportadora" type="text" placeholder="Ex: DHL" />
-          </div>
-          <div style="align-self:flex-end;">
-            <button class="btn secundario" onclick="aplicarFiltro()">Aplicar filtro</button>
-            <button class="btn secundario" onclick="limparFiltro()">Limpar</button>
-          </div>
-          <div style="align-self:flex-end; margin-left:auto;">
-            <button class="btn secundario" onclick="exportarExcel(false)">Exportar Excel (filtro)</button>
-            <button class="btn" onclick="exportarExcel(true)">Exportar Excel (todas)</button>
-          </div>
-        </div>
+    <section id="tab-faturas" class="tab-content active">
+      <h1>Lista de Faturas</h1>
 
-        <table id="tabela-faturas">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Transportadora</th>
-              <th>Nº Fatura</th>
-              <th>Valor</th>
-              <th>Vencimento</th>
-              <th>Status</th>
-              <th>Anexos</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-          </tbody>
-        </table>
-        <p class="texto-menor" id="resumo-faturas"></p>
+      <div class="filtro-bar">
+        <label>
+          Transportadora:
+          <input id="filtro-transportadora" type="text" placeholder="Ex: DHL" />
+        </label>
+        <button id="btn-aplicar-filtro">Aplicar filtro</button>
+        <button id="btn-limpar-filtro" class="secondary">Limpar</button>
+        <button id="btn-exportar-filtro">Exportar Excel (filtro)</button>
+        <button id="btn-exportar-todas" class="secondary">Exportar Excel (todas)</button>
+      </div>
+
+      <div id="faturas-por-responsavel">
+        <!-- preenchido pelo JS: Gabrielly / Juliana / Larissa -->
       </div>
     </section>
 
     <!-- ABA CADASTRO -->
-    <section id="aba-cadastro" class="hidden">
-      <div class="card">
-        <h2>Cadastro de Fatura</h2>
-        <form id="form-fatura">
-          <div class="linha">
-            <div style="flex:1 1 220px;">
-              <label for="cad-transportadora">Transportadora</label>
-              <input id="cad-transportadora" name="transportadora" type="text" required />
-            </div>
-            <div style="flex:1 1 180px;">
-              <label for="cad-numero">Número da Fatura</label>
-              <input id="cad-numero" name="numero_fatura" type="text" required />
-            </div>
-            <div style="flex:1 1 150px;">
-              <label for="cad-valor">Valor</label>
-              <input id="cad-valor" name="valor" type="number" step="0.01" min="0" required />
-            </div>
-          </div>
-          <div class="linha">
-            <div style="flex:1 1 200px;">
-              <label for="cad-vencimento">Data de Vencimento</label>
-              <input id="cad-vencimento" name="data_vencimento" type="date" required />
-            </div>
-            <div style="flex:1 1 160px;">
-              <label for="cad-status">Status</label>
-              <select id="cad-status" name="status">
-                <option value="pendente">Pendente</option>
-                <option value="atrasada">Atrasada</option>
-                <option value="paga">Paga</option>
-              </select>
-            </div>
-            <div style="flex:1 1 260px;">
-              <label for="cad-arquivos">Anexos (opcional)</label>
-              <input id="cad-arquivos" name="arquivos" type="file" multiple />
-              <div class="texto-menor">Você pode anexar PDFs, imagens ou planilhas.</div>
-            </div>
-          </div>
-          <button type="submit" class="btn">Salvar Fatura</button>
-        </form>
-      </div>
+    <section id="tab-cadastro" class="tab-content">
+      <h1>Cadastro de Fatura</h1>
+
+      <form id="form-cadastro" class="card">
+        <div class="form-row">
+          <label>
+            Transportadora
+            <input type="text" id="cad-transportadora" required />
+          </label>
+          <label>
+            Número da Fatura
+            <input type="text" id="cad-numero" required />
+          </label>
+          <label>
+            Valor
+            <input type="number" step="0.01" id="cad-valor" required />
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label>
+            Data de Vencimento
+            <input type="date" id="cad-vencimento" required />
+          </label>
+          <label>
+            Status
+            <select id="cad-status">
+              <option value="pendente">Pendente</option>
+              <option value="pago">Pago</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-row">
+          <label class="full">
+            Observação
+            <textarea id="cad-observacao" rows="3" placeholder="Observações gerais da fatura..."></textarea>
+          </label>
+        </div>
+
+        <p class="hint">
+          Anexos/arquivos ainda não estão gravando de fato no disco (campo visual). Vamos ligar isso depois.
+        </p>
+
+        <button type="submit">Salvar Fatura</button>
+      </form>
     </section>
 
     <!-- ABA DASHBOARD -->
-    <section id="aba-dashboard" class="hidden">
-      <div class="card">
-        <h2>Dashboard</h2>
-        <div class="cards-dashboard">
-          <div class="card-dashboard">
-            <h3>Valor total</h3>
-            <div id="dash-total-valor" class="valor">R$ 0,00</div>
-            <div id="dash-total-quantidade" class="quantidade">0 faturas</div>
-          </div>
-          <div class="card-dashboard">
-            <h3>Pendentes</h3>
-            <div id="dash-pendentes-valor" class="valor">R$ 0,00</div>
-            <div id="dash-pendentes-quantidade" class="quantidade">0 faturas</div>
-          </div>
-          <div class="card-dashboard">
-            <h3>Atrasadas</h3>
-            <div id="dash-atrasadas-valor" class="valor">R$ 0,00</div>
-            <div id="dash-atrasadas-quantidade" class="quantidade">0 faturas</div>
-          </div>
-          <div class="card-dashboard">
-            <h3>Em dia</h3>
-            <div id="dash-em-dia-valor" class="valor">R$ 0,00</div>
-            <div id="dash-em-dia-quantidade" class="quantidade">0 faturas</div>
-          </div>
+    <section id="tab-dashboard" class="tab-content">
+      <h1>Dashboard</h1>
+
+      <div class="cards-dashboard">
+        <div class="dash-card">
+          <div class="dash-title">Valor total</div>
+          <div class="dash-value" id="dash-total-valor">R$ 0,00</div>
         </div>
-        <button class="btn" onclick="carregarDashboard()">Atualizar Dashboard</button>
-        <button class="btn secundario" onclick="exportarExcel(true)">Exportar Excel (todas as faturas)</button>
+        <div class="dash-card">
+          <div class="dash-title">Pendentes</div>
+          <div class="dash-value" id="dash-pendentes">0 (R$ 0,00)</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-title">Atrasadas</div>
+          <div class="dash-value" id="dash-atrasadas">0 (R$ 0,00)</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-title">Em dia</div>
+          <div class="dash-value" id="dash-em-dia">0 (R$ 0,00)</div>
+        </div>
+      </div>
+
+      <div class="dashboard-actions">
+        <button id="btn-atualizar-dashboard">Atualizar Dashboard</button>
+        <button id="btn-exportar-todas-2" class="secondary">Exportar Excel (todas as faturas)</button>
       </div>
     </section>
   </main>
 
-  <script>
-    let faturasCache = [];
-    let menuAbertoId = null;
-
-    function formatarValor(v) {
-      return "R$ " + (v || 0).toLocaleString("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2});
-    }
-    function formatarData(iso) {
-      if (!iso) return "";
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return iso;
-      return d.toLocaleDateString("pt-BR");
-    }
-
-    function abrirAba(qual) {
-      document.getElementById("aba-faturas").classList.add("hidden");
-      document.getElementById("aba-cadastro").classList.add("hidden");
-      document.getElementById("aba-dashboard").classList.add("hidden");
-      document.getElementById("btn-aba-faturas").classList.remove("ativo");
-      document.getElementById("btn-aba-cadastro").classList.remove("ativo");
-      document.getElementById("btn-aba-dashboard").classList.remove("ativo");
-
-      if (qual === "faturas") {
-        document.getElementById("aba-faturas").classList.remove("hidden");
-        document.getElementById("btn-aba-faturas").classList.add("ativo");
-        carregarFaturas();
-      } else if (qual === "cadastro") {
-        document.getElementById("aba-cadastro").classList.remove("hidden");
-        document.getElementById("btn-aba-cadastro").classList.add("ativo");
-      } else {
-        document.getElementById("aba-dashboard").classList.remove("hidden");
-        document.getElementById("btn-aba-dashboard").classList.add("ativo");
-        carregarDashboard();
-      }
-    }
-
-    async function carregarFaturas() {
-      fecharMenu();
-      const filtro = document.getElementById("filtro-transportadora").value.trim();
-      let url = "/api/faturas";
-      if (filtro) {
-        url += "?transportadora=" + encodeURIComponent(filtro);
-      }
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error();
-        const dados = await resp.json();
-        faturasCache = dados;
-        preencherTabela();
-      } catch {
-        alert("Erro ao carregar faturas.");
-      }
-    }
-
-    function preencherTabela() {
-      const tbody = document.querySelector("#tabela-faturas tbody");
-      tbody.innerHTML = "";
-      let total = 0;
-
-      faturasCache.forEach(f => {
-        total += f.valor || 0;
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td>${f.id}</td>
-          <td>${f.transportadora}</td>
-          <td>${f.numero_fatura}</td>
-          <td>${formatarValor(f.valor)}</td>
-          <td>${formatarData(f.data_vencimento)}</td>
-          <td>${renderizarStatus(f.status)}</td>
-          <td>${(f.anexos || []).length} arquivo(s)</td>
-          <td class="acoes-linha">
-            <button class="btn secundario" style="padding:4px 10px;" onclick="toggleMenu(${f.id}, event)">⋮</button>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      });
-
-      const resumo = document.getElementById("resumo-faturas");
-      resumo.textContent = faturasCache.length + " fatura(s) | Total: " + formatarValor(total);
-    }
-
-    function renderizarStatus(status) {
-      const s = (status || "").toLowerCase();
-      let classe = "pendente";
-      if (s === "atrasada") classe = "atrasada";
-      if (s === "paga" || s === "em dia") classe = "em-dia";
-      return `<span class="badge ${classe}">${status}</span>`;
-    }
-
-    function aplicarFiltro() {
-      carregarFaturas();
-    }
-    function limparFiltro() {
-      document.getElementById("filtro-transportadora").value = "";
-      carregarFaturas();
-    }
-
-    function exportarExcel(todas) {
-      const filtro = document.getElementById("filtro-transportadora").value.trim();
-      let url = "/api/faturas/exportar";
-      if (!todas && filtro) {
-        url += "?transportadora=" + encodeURIComponent(filtro);
-      }
-      window.location.href = url;
-    }
-
-    document.getElementById("form-fatura").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const form = e.target;
-      const dados = new FormData(form);
-
-      try {
-        const resp = await fetch("/api/faturas", {
-          method: "POST",
-          body: dados,
-        });
-        if (!resp.ok) throw new Error();
-        alert("Fatura salva com sucesso!");
-        form.reset();
-        abrirAba("faturas");
-      } catch {
-        alert("Erro ao salvar fatura.");
-      }
-    });
-
-    async function carregarDashboard() {
-      try {
-        const resp = await fetch("/api/dashboard-resumo");
-        if (!resp.ok) throw new Error();
-        const d = await resp.json();
-
-        document.getElementById("dash-total-valor").textContent = formatarValor(d.total.valor);
-        document.getElementById("dash-total-quantidade").textContent = d.total.quantidade + " fatura(s)";
-
-        document.getElementById("dash-pendentes-valor").textContent = formatarValor(d.pendentes.valor);
-        document.getElementById("dash-pendentes-quantidade").textContent = d.pendentes.quantidade + " fatura(s)";
-
-        document.getElementById("dash-atrasadas-valor").textContent = formatarValor(d.atrasadas.valor);
-        document.getElementById("dash-atrasadas-quantidade").textContent = d.atrasadas.quantidade + " fatura(s)";
-
-        document.getElementById("dash-em-dia-valor").textContent = formatarValor(d.em_dia.valor);
-        document.getElementById("dash-em-dia-quantidade").textContent = d.em_dia.quantidade + " fatura(s)";
-      } catch {
-        alert("Erro ao carregar dashboard.");
-      }
-    }
-
-    function toggleMenu(id, event) {
-      event.stopPropagation();
-      fecharMenu();
-      const td = event.currentTarget.parentElement;
-      const menu = document.createElement("div");
-      menu.className = "menu-pontos";
-      menu.innerHTML = `
-        <button onclick="editarFatura(${id})">Editar fatura</button>
-        <button onclick="alterarStatus(${id})">Alterar status</button>
-        <button onclick="baixarAnexos(${id})">Baixar anexos</button>
-        <button onclick="excluirFatura(${id})" style="color:#b3261e;">Excluir</button>
-      `;
-      td.appendChild(menu);
-      menuAbertoId = id;
-    }
-
-    function fecharMenu() {
-      const menus = document.querySelectorAll(".menu-pontos");
-      menus.forEach(m => m.remove());
-      menuAbertoId = null;
-    }
-    document.addEventListener("click", () => fecharMenu());
-
-    function obterFaturaCache(id) {
-      return faturasCache.find(f => f.id === id);
-    }
-
-    async function editarFatura(id) {
-      const f = obterFaturaCache(id);
-      if (!f) return;
-      const transportadora = prompt("Transportadora:", f.transportadora);
-      if (transportadora === null) return;
-      const numero_fatura = prompt("Número da fatura:", f.numero_fatura);
-      if (numero_fatura === null) return;
-      const valor = prompt("Valor:", f.valor);
-      if (valor === null) return;
-      const data_vencimento = prompt("Data de vencimento (AAAA-MM-DD):", f.data_vencimento);
-      if (data_vencimento === null) return;
-      const status = prompt("Status (pendente, atrasada, paga):", f.status);
-      if (status === null) return;
-
-      try {
-        const resp = await fetch("/api/faturas/" + id, {
-          method: "PUT",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ transportadora, numero_fatura, valor: parseFloat(valor), data_vencimento, status }),
-        });
-        if (!resp.ok) throw new Error();
-        fecharMenu();
-        carregarFaturas();
-        carregarDashboard();
-      } catch {
-        alert("Erro ao editar fatura.");
-      }
-    }
-
-    async function alterarStatus(id) {
-      const f = obterFaturaCache(id);
-      if (!f) return;
-      const status = prompt("Novo status:", f.status);
-      if (status === null) return;
-      try {
-        const resp = await fetch("/api/faturas/" + id + "/status", {
-          method: "PATCH",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({status}),
-        });
-        if (!resp.ok) throw new Error();
-        fecharMenu();
-        carregarFaturas();
-        carregarDashboard();
-      } catch {
-        alert("Erro ao alterar status.");
-      }
-    }
-
-    async function excluirFatura(id) {
-      if (!confirm("Tem certeza que deseja excluir esta fatura?")) return;
-      try {
-        const resp = await fetch("/api/faturas/" + id, { method: "DELETE" });
-        if (!resp.ok) throw new Error();
-        fecharMenu();
-        carregarFaturas();
-        carregarDashboard();
-      } catch {
-        alert("Erro ao excluir fatura.");
-      }
-    }
-
-    async function baixarAnexos(id) {
-      try {
-        const resp = await fetch("/api/faturas/" + id + "/anexos");
-        if (!resp.ok) throw new Error();
-        const anexos = await resp.json();
-        if (!anexos.length) {
-          alert("Nenhum anexo para esta fatura.");
-          return;
-        }
-        anexos.forEach(a => {
-          window.open("/api/anexos/" + a.id + "/download", "_blank");
-        });
-      } catch {
-        alert("Erro ao buscar anexos.");
-      }
-    }
-
-    // carrega faturas ao abrir a página
-    carregarFaturas();
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
