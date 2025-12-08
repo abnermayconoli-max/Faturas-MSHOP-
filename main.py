@@ -1,13 +1,11 @@
 from datetime import date
 import os
-from io import StringIO
-import csv
+from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
-
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -19,6 +17,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
+import io
+import csv
 
 # =========================
 # CONFIG BANCO DE DADOS
@@ -27,7 +27,9 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL não configurada nas variáveis de ambiente do Render.")
+    raise RuntimeError(
+        "DATABASE_URL não configurada nas variáveis de ambiente do Render."
+    )
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -47,15 +49,15 @@ class FaturaDB(Base):
     valor = Column(Numeric(10, 2))
     data_vencimento = Column(Date)
     status = Column(String, default="pendente")
-    observacao = Column(String, nullable=True)  # <--- NOVO CAMPO
-    anexos = Column(String, nullable=True)      # nomes de arquivos separados por ; (opcional)
+    observacao = Column(String, nullable=True)
 
 
+# Cria a tabela se ainda não existir
 Base.metadata.create_all(bind=engine)
 
 
 # =========================
-# MODELOS Pydantic
+# MODELOS Pydantic (entrada/saída)
 # =========================
 
 class FaturaBase(BaseModel):
@@ -64,24 +66,37 @@ class FaturaBase(BaseModel):
     valor: float
     data_vencimento: date
     status: str = "pendente"
-    observacao: str | None = None
+    observacao: Optional[str] = None
+
 
 class FaturaCreate(FaturaBase):
     pass
 
+
 class FaturaUpdate(BaseModel):
-    transportadora: str | None = None
-    numero_fatura: str | None = None
-    valor: float | None = None
-    data_vencimento: date | None = None
-    status: str | None = None
-    observacao: str | None = None
+    transportadora: Optional[str] = None
+    numero_fatura: Optional[str] = None
+    valor: Optional[float] = None
+    data_vencimento: Optional[date] = None
+    status: Optional[str] = None
+    observacao: Optional[str] = None
+
 
 class FaturaOut(FaturaBase):
     id: int
 
     class Config:
         orm_mode = True
+
+
+class DashboardOut(BaseModel):
+    valor_total: float
+    pendentes_qtd: int
+    pendentes_valor: float
+    atrasadas_qtd: int
+    atrasadas_valor: float
+    em_dia_qtd: int
+    em_dia_valor: float
 
 
 # =========================
@@ -101,11 +116,11 @@ def get_db():
 # =========================
 
 app = FastAPI(
-    title="Sistema de Faturas Transportadoras",
+    title="Faturas MSHOP",
     version="0.3.0",
 )
 
-# CORS para o front em /static
+# CORS (para o front conseguir chamar a API sem problema)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -114,26 +129,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# servir o front (SPA)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# servir arquivos estáticos (index.html, css, js)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-@app.get("/api")
-def read_root():
-    return {"mensagem": "API de Faturas com banco PostgreSQL no Render!"}
+@app.get("/", include_in_schema=False)
+def serve_front():
+    """
+    Quando acessar a raiz, abre o front (index.html).
+    """
+    return FileResponse("static/index.html")
 
 
-@app.get("/api/health")
+@app.get("/health")
 def health_check():
     return {"status": "ok"}
 
 
 # =========================
-# ROTAS CRUD DE FATURAS
+# ROTAS DE FATURAS
 # =========================
 
-@app.post("/api/faturas", response_model=FaturaOut)
+# >>>>>>> ESSA É A ROTA QUE ESTAVA FALTANDO <<<<<<<<
+@app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
+    """
+    Criar nova fatura.
+    Chamado pelo botão 'Salvar Fatura' do front.
+    """
     db_fatura = FaturaDB(
         transportadora=fatura.transportadora,
         numero_fatura=fatura.numero_fatura,
@@ -148,13 +171,20 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     return db_fatura
 
 
-@app.get("/api/faturas", response_model=list[FaturaOut])
-def listar_faturas(db: Session = Depends(get_db)):
-    faturas = db.query(FaturaDB).order_by(FaturaDB.data_vencimento).all()
+@app.get("/faturas", response_model=List[FaturaOut])
+def listar_faturas(transportadora: Optional[str] = None,
+                   db: Session = Depends(get_db)):
+    """
+    Lista faturas. Se vier ?transportadora=DHL filtra por ela.
+    """
+    query = db.query(FaturaDB)
+    if transportadora:
+        query = query.filter(FaturaDB.transportadora == transportadora)
+    faturas = query.order_by(FaturaDB.id).all()
     return faturas
 
 
-@app.get("/api/faturas/{fatura_id}", response_model=FaturaOut)
+@app.get("/faturas/{fatura_id}", response_model=FaturaOut)
 def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -162,8 +192,12 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     return fatura
 
 
-@app.put("/api/faturas/{fatura_id}", response_model=FaturaOut)
-def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(get_db)):
+@app.put("/faturas/{fatura_id}", response_model=FaturaOut)
+def atualizar_fatura(
+    fatura_id: int,
+    dados: FaturaUpdate,
+    db: Session = Depends(get_db),
+):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
@@ -176,90 +210,88 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(
     return fatura
 
 
-@app.delete("/api/faturas/{fatura_id}")
-def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
+@app.patch("/faturas/{fatura_id}/status", response_model=FaturaOut)
+def atualizar_status_fatura(
+    fatura_id: int,
+    status: str,
+    db: Session = Depends(get_db),
+):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
-    db.delete(fatura)
-    db.commit()
-    return {"ok": True}
-
-
-@app.patch("/api/faturas/{fatura_id}/status", response_model=FaturaOut)
-def atualizar_status_fatura(fatura_id: int, status: str, db: Session = Depends(get_db)):
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
     fatura.status = status
     db.commit()
     db.refresh(fatura)
     return fatura
 
 
-@app.get("/api/faturas/atrasadas", response_model=list[FaturaOut])
-def listar_atrasadas(db: Session = Depends(get_db)):
-    hoje = date.today()
-    faturas = (
-        db.query(FaturaDB)
-        .filter(FaturaDB.data_vencimento < hoje, FaturaDB.status != "pago")
-        .order_by(FaturaDB.data_vencimento)
-        .all()
-    )
-    return faturas
+@app.delete("/faturas/{fatura_id}")
+def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
+    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
+    if not fatura:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+    db.delete(fatura)
+    db.commit()
+    return {"ok": True}
 
 
 # =========================
 # DASHBOARD
 # =========================
 
-@app.get("/api/dashboard")
-def dashboard(db: Session = Depends(get_db)):
-    hoje = date.today()
+@app.get("/dashboard", response_model=DashboardOut)
+def obter_dashboard(db: Session = Depends(get_db)):
     faturas = db.query(FaturaDB).all()
 
-    total_valor = sum(float(f.valor) for f in faturas) if faturas else 0.0
+    valor_total = sum(float(f.valor) for f in faturas)
 
     pendentes = [f for f in faturas if f.status.lower() == "pendente"]
-    atrasadas = [
-        f for f in faturas
-        if f.status.lower() != "pago" and f.data_vencimento < hoje
-    ]
-    em_dia = [
-        f for f in faturas
-        if f.status.lower() == "pago" or f.data_vencimento >= hoje
-    ]
+    atrasadas = [f for f in faturas if f.status.lower() == "atrasada"]
+    em_dia = [f for f in faturas if f.status.lower() == "em dia"]
 
-    return {
-        "total_valor": total_valor,
-        "pendentes_qtd": len(pendentes),
-        "pendentes_valor": sum(float(f.valor) for f in pendentes) if pendentes else 0.0,
-        "atrasadas_qtd": len(atrasadas),
-        "atrasadas_valor": sum(float(f.valor) for f in atrasadas) if atrasadas else 0.0,
-        "em_dia_qtd": len(em_dia),
-        "em_dia_valor": sum(float(f.valor) for f in em_dia) if em_dia else 0.0,
-    }
+    pendentes_valor = sum(float(f.valor) for f in pendentes)
+    atrasadas_valor = sum(float(f.valor) for f in atrasadas)
+    em_dia_valor = sum(float(f.valor) for f in em_dia)
+
+    return DashboardOut(
+        valor_total=valor_total,
+        pendentes_qtd=len(pendentes),
+        pendentes_valor=pendentes_valor,
+        atrasadas_qtd=len(atrasadas),
+        atrasadas_valor=atrasadas_valor,
+        em_dia_qtd=len(em_dia),
+        em_dia_valor=em_dia_valor,
+    )
 
 
 # =========================
-# EXPORTAR "EXCEL" (CSV)
+# EXPORTAÇÃO EXCEL (CSV)
 # =========================
 
-@app.get("/api/faturas/exportar")
-def exportar_faturas(transportadora: str | None = None, db: Session = Depends(get_db)):
+@app.get("/faturas/exportar")
+def exportar_faturas(transportadora: Optional[str] = None,
+                     db: Session = Depends(get_db)):
+    """
+    Exporta faturas (todas ou filtradas por transportadora) em CSV.
+    """
     query = db.query(FaturaDB)
     if transportadora:
-        query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
+        query = query.filter(FaturaDB.transportadora == transportadora)
 
-    faturas = query.order_by(FaturaDB.data_vencimento).all()
+    faturas = query.order_by(FaturaDB.id).all()
 
-    # CSV em memória (abre no Excel normal)
-    buffer = StringIO()
-    writer = csv.writer(buffer, delimiter=";")
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
 
-    writer.writerow(["ID", "Transportadora", "Número Fatura", "Valor", "Vencimento", "Status", "Observação"])
+    writer.writerow([
+        "ID",
+        "Transportadora",
+        "Número Fatura",
+        "Valor",
+        "Data Vencimento",
+        "Status",
+        "Observação",
+    ])
 
     for f in faturas:
         writer.writerow([
@@ -272,14 +304,12 @@ def exportar_faturas(transportadora: str | None = None, db: Session = Depends(ge
             f.observacao or "",
         ])
 
-    buffer.seek(0)
-
+    output.seek(0)
     headers = {
         "Content-Disposition": 'attachment; filename="faturas.csv"'
     }
-
     return StreamingResponse(
-        buffer,
+        iter([output.getvalue()]),
         media_type="text/csv",
         headers=headers,
     )
