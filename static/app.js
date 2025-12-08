@@ -1,88 +1,90 @@
-// URL base (vazio = mesmo domínio)
+// ============================
+// CONFIG / ESTADO
+// ============================
+
 const API_BASE = "";
 
-// Estado de filtros
 let filtroTransportadora = "";
 let filtroVencimento = "";
 let filtroNumeroFatura = "";
 
-// ============ HELPERS ============
+// Helpers DOM
+const $ = (id) => document.getElementById(id);
+const on = (id, evt, handler) => {
+  const el = $(id);
+  if (el) el.addEventListener(evt, handler);
+};
+
+// ============================
+// HELPERS
+// ============================
 
 function formatCurrency(valor) {
-    if (valor === null || valor === undefined) return "R$ 0,00";
-    return valor.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-        minimumFractionDigits: 2,
-    });
+  if (valor === null || valor === undefined || valor === "") return "R$ 0,00";
+  const num = Number(valor);
+  if (Number.isNaN(num)) return "R$ 0,00";
+  return num.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
 }
 
 function formatDate(isoDate) {
-    if (!isoDate) return "";
-    const d = new Date(isoDate);
-    if (Number.isNaN(d.getTime())) return isoDate;
-    return d.toLocaleDateString("pt-BR");
+  if (!isoDate) return "";
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString("pt-BR");
 }
 
-// ============ DASHBOARD ============
+// ============================
+// DASHBOARD
+// ============================
 
 async function carregarDashboard() {
-    try {
-        const resp = await fetch(`${API_BASE}/dashboard/resumo`);
-        if (!resp.ok) throw new Error("Erro ao buscar resumo");
+  try {
+    const resp = await fetch(`${API_BASE}/dashboard/resumo`);
+    if (!resp.ok) throw new Error("Erro ao buscar resumo");
 
-        const data = await resp.json();
+    const data = await resp.json();
+    const total = data.total ?? 0;
+    const pendentes = data.pendentes ?? 0;
+    const atrasadas = data.atrasadas ?? 0;
+    const emDia = data.em_dia ?? 0;
 
-        document.getElementById("cardTotal").textContent = formatCurrency(
-            data.total
-        );
-        document.getElementById("cardPendentes").textContent = formatCurrency(
-            data.pendentes
-        );
-        document.getElementById("cardAtrasadas").textContent = formatCurrency(
-            data.atrasadas
-        );
-        document.getElementById("cardEmDia").textContent = formatCurrency(
-            data.em_dia
-        );
-    } catch (err) {
-        console.error(err);
-        alert("Erro ao carregar dashboard");
-    }
+    const cardTotal = $("cardTotal");
+    const cardPendentes = $("cardPendentes");
+    const cardAtrasadas = $("cardAtrasadas");
+    const cardEmDia = $("cardEmDia");
+
+    if (cardTotal) cardTotal.textContent = formatCurrency(total);
+    if (cardPendentes) cardPendentes.textContent = formatCurrency(pendentes);
+    if (cardAtrasadas) cardAtrasadas.textContent = formatCurrency(atrasadas);
+    if (cardEmDia) cardEmDia.textContent = formatCurrency(emDia);
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar dashboard");
+  }
 }
 
-// ============ FATURAS ============
+// ============================
+// FATURAS
+// ============================
 
 async function carregarFaturas() {
   try {
     const params = new URLSearchParams();
+    if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
+    if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
 
-    if (filtroTransportadora) {
-      params.append("transportadora", filtroTransportadora);
-    }
-
-    // Só manda a data se tiver valor (evita erro 422)
-    if (filtroVencimento && filtroVencimento.trim() !== "") {
-      params.append("ate_vencimento", filtroVencimento);
-    }
-
-    // Só manda o número de fatura se tiver texto
-    if (filtroNumeroFatura && filtroNumeroFatura.trim() !== "") {
-      params.append("numero_fatura", filtroNumeroFatura.trim());
-    }
-
-    const queryString = params.toString();
-    const url = queryString
-      ? `${API_BASE}/faturas?${queryString}`
-      : `${API_BASE}/faturas`;
-
+    const url = `${API_BASE}/faturas?${params.toString()}`;
     const resp = await fetch(url);
-    if (!resp.ok) {
-      throw new Error("Erro ao listar faturas");
-    }
+    if (!resp.ok) throw new Error("Erro ao listar faturas");
 
     const faturas = await resp.json();
-    const tbody = document.getElementById("tbodyFaturas");
+    const tbody = $("tbodyFaturas");
+    if (!tbody) return;
+
     tbody.innerHTML = "";
 
     faturas.forEach((f) => {
@@ -110,32 +112,34 @@ async function carregarFaturas() {
       const menuBtn = tr.querySelector(".menu-btn");
       const dropdown = tr.querySelector(".menu-dropdown");
 
-      menuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        document
-          .querySelectorAll(".menu-dropdown.ativo")
-          .forEach((m) => m.classList.remove("ativo"));
-        dropdown.classList.toggle("ativo");
-      });
+      if (menuBtn && dropdown) {
+        menuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          document
+            .querySelectorAll(".menu-dropdown.ativo")
+            .forEach((m) => m.classList.remove("ativo"));
+          dropdown.classList.toggle("ativo");
+        });
 
-      dropdown.addEventListener("click", async (e) => {
-        const acao = e.target.dataset.acao;
-        if (!acao) return;
+        dropdown.addEventListener("click", async (e) => {
+          const acao = e.target.dataset.acao;
+          if (!acao) return;
 
-        if (acao === "excluir") {
-          await excluirFatura(f.id);
-        } else if (acao === "editar") {
-          preencherFormularioEdicao(f);
-        } else if (acao === "anexos") {
-          abrirModalAnexos(f.id);
-        }
-
-        dropdown.classList.remove("ativo");
-      });
+          if (acao === "excluir") {
+            await excluirFatura(f.id);
+          } else if (acao === "editar") {
+            preencherFormularioEdicao(f);
+          } else if (acao === "anexos") {
+            abrirModalAnexos(f.id);
+          }
+          dropdown.classList.remove("ativo");
+        });
+      }
 
       tbody.appendChild(tr);
     });
 
+    // fecha menus ao clicar fora
     document.addEventListener("click", () => {
       document
         .querySelectorAll(".menu-dropdown.ativo")
@@ -147,289 +151,243 @@ async function carregarFaturas() {
   }
 }
 
-
-            // listeners do menu
-            const menuBtn = tr.querySelector(".menu-btn");
-            const dropdown = tr.querySelector(".menu-dropdown");
-
-            menuBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                document
-                    .querySelectorAll(".menu-dropdown.ativo")
-                    .forEach((m) => m.classList.remove("ativo"));
-                dropdown.classList.toggle("ativo");
-            });
-
-            dropdown.addEventListener("click", async (e) => {
-                const acao = e.target.dataset.acao;
-                if (!acao) return;
-
-                if (acao === "excluir") {
-                    await excluirFatura(f.id);
-                } else if (acao === "editar") {
-                    preencherFormularioEdicao(f);
-                } else if (acao === "anexos") {
-                    abrirModalAnexos(f.id);
-                }
-
-                dropdown.classList.remove("ativo");
-            });
-
-            tbody.appendChild(tr);
-        });
-
-        // fecha menus ao clicar fora
-        document.addEventListener("click", () => {
-            document
-                .querySelectorAll(".menu-dropdown.ativo")
-                .forEach((m) => m.classList.remove("ativo"));
-        });
-    } catch (err) {
-        console.error(err);
-        alert("Erro ao carregar faturas");
-    }
-}
-
 async function excluirFatura(id) {
-    if (!confirm(`Excluir fatura ${id}?`)) return;
-
-    try {
-        const resp = await fetch(`${API_BASE}/faturas/${id}`, {
-            method: "DELETE",
-        });
-        if (!resp.ok) throw new Error("Erro ao excluir");
-        await carregarFaturas();
-        await carregarDashboard();
-    } catch (err) {
-        console.error(err);
-        alert("Erro ao excluir fatura");
-    }
+  if (!confirm(`Excluir fatura ${id}?`)) return;
+  try {
+    const resp = await fetch(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error("Erro ao excluir");
+    await carregarFaturas();
+    await carregarDashboard();
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao excluir fatura");
+  }
 }
 
 function preencherFormularioEdicao(f) {
-    document.getElementById("inputTransportadora").value = f.transportadora;
-    document.getElementById("inputNumeroFatura").value = f.numero_fatura;
-    document.getElementById("inputValor").value = f.valor;
-    document.getElementById("inputVencimento").value = f.data_vencimento;
-    document.getElementById("inputStatus").value = f.status;
-    document.getElementById("inputObservacao").value = f.observacao ?? "";
+  const form = $("formFatura");
+  if (!form) return;
 
-    // guarda o id que está sendo editado
-    document.getElementById("formFatura").dataset.editId = f.id;
+  $("inputTransportadora") && ( $("inputTransportadora").value = f.transportadora );
+  $("inputNumeroFatura") && ( $("inputNumeroFatura").value = f.numero_fatura );
+  $("inputValor") && ( $("inputValor").value = f.valor );
+  $("inputVencimento") && ( $("inputVencimento").value = f.data_vencimento );
+  $("inputStatus") && ( $("inputStatus").value = f.status );
+  $("inputObservacao") && ( $("inputObservacao").value = f.observacao ?? "" );
+
+  form.dataset.editId = f.id;
 }
 
-// ============ ANEXOS (MODAL) ============
+// ============================
+// ANEXOS (MODAL)
+// ============================
 
 async function abrirModalAnexos(faturaId) {
-    document.getElementById("modalFaturaId").textContent = faturaId;
-    const lista = document.getElementById("listaAnexos");
-    lista.innerHTML = "Carregando...";
+  const modal = $("modalAnexos");
+  const lista = $("listaAnexos");
+  const spanId = $("modalFaturaId");
+  if (!modal || !lista || !spanId) return;
 
-    try {
-        const resp = await fetch(`${API_BASE}/faturas/${faturaId}/anexos`);
-        if (!resp.ok) throw new Error("Erro ao listar anexos");
-        const anexos = await resp.json();
+  spanId.textContent = faturaId;
+  lista.innerHTML = "Carregando...";
 
-        if (anexos.length === 0) {
-            lista.innerHTML = "<li>Sem anexos.</li>";
-        } else {
-            lista.innerHTML = "";
-            anexos.forEach((a) => {
-                const li = document.createElement("li");
-                const link = document.createElement("a");
-                link.href = `${API_BASE}/anexos/${a.id}`;
-                link.target = "_blank";
-                link.textContent = a.original_name;
-                li.appendChild(link);
-                lista.appendChild(li);
-            });
-        }
-    } catch (err) {
-        console.error(err);
-        lista.innerHTML = "<li>Erro ao carregar anexos.</li>";
+  try:
+    const resp = await fetch(`${API_BASE}/faturas/${faturaId}/anexos`);
+    if (!resp.ok) throw new Error("Erro ao listar anexos");
+    const anexos = await resp.json();
+
+    if (!anexos.length) {
+      lista.innerHTML = "<li>Sem anexos.</li>";
+    } else {
+      lista.innerHTML = "";
+      anexos.forEach((a) => {
+        const li = document.createElement("li");
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/anexos/${a.id}`;
+        link.target = "_blank";
+        link.textContent = a.original_name;
+        li.appendChild(link);
+        lista.appendChild(li);
+      });
     }
+  } catch (err) {
+    console.error(err);
+    lista.innerHTML = "<li>Erro ao carregar anexos.</li>";
+  }
 
-    document.getElementById("modalAnexos").classList.add("open");
+  modal.classList.add("open");
 }
 
-// ============ FORMULÁRIO ============
+// ============================
+// FORMULÁRIO
+// ============================
 
 async function salvarFatura(e) {
-    e.preventDefault();
+  e.preventDefault();
+  const form = $("formFatura");
+  if (!form) return;
 
-    const form = document.getElementById("formFatura");
-    const editId = form.dataset.editId || null;
+  const editId = form.dataset.editId || null;
 
-    const payload = {
-        transportadora: document.getElementById("inputTransportadora").value,
-        numero_fatura: document.getElementById("inputNumeroFatura").value,
-        valor: parseFloat(document.getElementById("inputValor").value || "0"),
-        data_vencimento: document.getElementById("inputVencimento").value,
-        status: document.getElementById("inputStatus").value,
-        observacao: document.getElementById("inputObservacao").value || null,
-    };
+  const payload = {
+    transportadora: $("inputTransportadora")?.value || "",
+    numero_fatura: $("inputNumeroFatura")?.value || "",
+    valor: parseFloat($("inputValor")?.value || "0"),
+    data_vencimento: $("inputVencimento")?.value || "",
+    status: $("inputStatus")?.value || "pendente",
+    observacao: $("inputObservacao")?.value || null,
+  };
 
-    try {
-        let resp;
-        if (editId) {
-            // atualização
-            resp = await fetch(`${API_BASE}/faturas/${editId}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-        } else {
-            // criação
-            resp = await fetch(`${API_BASE}/faturas`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-        }
-
-        if (!resp.ok) throw new Error("Erro ao salvar fatura");
-        const faturaCriadaOuEditada = await resp.json();
-
-        // upload de anexos se tiver
-        const inputAnexos = document.getElementById("inputAnexos");
-        if (inputAnexos.files.length > 0) {
-            const fd = new FormData();
-            for (const file of inputAnexos.files) {
-                fd.append("files", file);
-            }
-            const respAnexos = await fetch(
-                `${API_BASE}/faturas/${faturaCriadaOuEditada.id}/anexos`,
-                {
-                    method: "POST",
-                    body: fd,
-                }
-            );
-            if (!respAnexos.ok) {
-                console.error("Erro ao enviar anexos");
-            }
-        }
-
-        form.reset();
-        delete form.dataset.editId;
-        await carregarFaturas();
-        await carregarDashboard();
-    } catch (err) {
-        console.error(err);
-        alert("Erro ao salvar fatura");
+  try {
+    let resp;
+    if (editId) {
+      resp = await fetch(`${API_BASE}/faturas/${editId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      resp = await fetch(`${API_BASE}/faturas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
     }
+
+    if (!resp.ok) throw new Error("Erro ao salvar fatura");
+    const fatura = await resp.json();
+
+    // anexos
+    const inputAnexos = $("inputAnexos");
+    if (inputAnexos && inputAnexos.files.length > 0) {
+      const fd = new FormData();
+      for (const file of inputAnexos.files) {
+        fd.append("files", file);
+      }
+      const respAnexo = await fetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!respAnexo.ok) console.error("Erro ao enviar anexos");
+    }
+
+    form.reset();
+    delete form.dataset.editId;
+
+    await carregarFaturas();
+    await carregarDashboard();
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao salvar fatura");
+  }
 }
 
-// ============ ABAS / NAVEGAÇÃO ============
+// ============================
+// ABAS / NAVEGAÇÃO
+// ============================
 
 function ativarAba(aba) {
-    const dash = document.getElementById("dashboardSection");
-    const fat = document.getElementById("faturasSection");
-    const tabDash = document.getElementById("tabDashboard");
-    const tabFat = document.getElementById("tabFaturas");
+  const dash = $("dashboardSection");
+  const fat = $("faturasSection");
+  const tabDash = $("tabDashboard");
+  const tabFat = $("tabFaturas");
 
-    if (aba === "dashboard") {
-        dash.classList.add("visible");
-        fat.classList.remove("visible");
-        tabDash.classList.add("active");
-        tabFat.classList.remove("active");
-    } else {
-        fat.classList.add("visible");
-        dash.classList.remove("visible");
-        tabFat.classList.add("active");
-        tabDash.classList.remove("active");
-    }
+  if (!dash || !fat || !tabDash || !tabFat) return;
+
+  if (aba === "dashboard") {
+    dash.classList.add("visible");
+    fat.classList.remove("visible");
+    tabDash.classList.add("active");
+    tabFat.classList.remove("active");
+  } else {
+    fat.classList.add("visible");
+    dash.classList.remove("visible");
+    tabFat.classList.add("active");
+    tabDash.classList.remove("active");
+  }
 }
 
-// ============ INIT ============
+// ============================
+// INICIALIZAÇÃO
+// ============================
 
 document.addEventListener("DOMContentLoaded", () => {
+  try {
     // abas
-    document.getElementById("tabDashboard").addEventListener("click", () =>
-        ativarAba("dashboard")
-    );
-    document.getElementById("tabFaturas").addEventListener("click", () =>
-        ativarAba("faturas")
-    );
+    on("tabDashboard", "click", () => ativarAba("dashboard"));
+    on("tabFaturas", "click", () => ativarAba("faturas"));
 
-    // botão página inicial (leva para dashboard e limpa filtros)
-    document.getElementById("btnHome").addEventListener("click", () => {
-        filtroTransportadora = "";
-        filtroVencimento = "";
-        filtroNumeroFatura = "";
-        document.getElementById("filtroVencimento").value = "";
-        document.getElementById("buscaNumero").value = "";
-        ativarAba("dashboard");
-        carregarDashboard();
-        carregarFaturas();
+    // botões principais
+    on("btnHome", "click", () => {
+      filtroTransportadora = "";
+      filtroVencimento = "";
+      filtroNumeroFatura = "";
+      if ($("filtroVencimento")) $("filtroVencimento").value = "";
+      if ($("buscaNumero")) $("buscaNumero").value = "";
+      ativarAba("dashboard");
+      carregarDashboard();
+      carregarFaturas();
     });
 
-    // filtro transportadora (botões da sidebar)
-    document
-        .querySelectorAll(".transportadora-btn")
-        .forEach((btn) =>
-            btn.addEventListener("click", () => {
-                filtroTransportadora = btn.dataset.transportadora || "";
-                // marca visualmente
-                document
-                    .querySelectorAll(".transportadora-btn")
-                    .forEach((b) => b.classList.remove("selected"));
-                btn.classList.add("selected");
-                ativarAba("faturas");
-                carregarFaturas();
-            })
-        );
+    // transportadoras na sidebar
+    document.querySelectorAll(".transportadora-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        filtroTransportadora = btn.dataset.transportadora || "";
+        document
+          .querySelectorAll(".transportadora-btn")
+          .forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        ativarAba("faturas");
+        carregarFaturas();
+      });
+    });
 
     // filtro vencimento
-    document
-        .getElementById("filtroVencimento")
-        .addEventListener("change", (e) => {
-            filtroVencimento = e.target.value;
-            carregarFaturas();
-        });
+    on("filtroVencimento", "change", (e) => {
+      filtroVencimento = e.target.value;
+      carregarFaturas();
+    });
 
-    document
-        .getElementById("btnLimparFiltros")
-        .addEventListener("click", () => {
-            filtroVencimento = "";
-            document.getElementById("filtroVencimento").value = "";
-            filtroNumeroFatura = "";
-            document.getElementById("buscaNumero").value = "";
-            carregarFaturas();
-        });
+    on("btnLimparFiltros", "click", () => {
+      filtroVencimento = "";
+      filtroNumeroFatura = "";
+      if ($("filtroVencimento")) $("filtroVencimento").value = "";
+      if ($("buscaNumero")) $("buscaNumero").value = "";
+      carregarFaturas();
+    });
 
-    // busca por número de fatura
-    document
-        .getElementById("buscaNumero")
-        .addEventListener("input", (e) => {
-            filtroNumeroFatura = e.target.value.trim();
-            carregarFaturas();
-        });
+    // busca nº fatura
+    on("buscaNumero", "input", (e) => {
+      filtroNumeroFatura = e.target.value.trim();
+      carregarFaturas();
+    });
 
-    // botão atualizar lista
-    document
-        .getElementById("btnAtualizarFaturas")
-        .addEventListener("click", carregarFaturas);
+    // atualizar lista
+    on("btnAtualizarFaturas", "click", carregarFaturas);
 
     // formulário
-    document
-        .getElementById("formFatura")
-        .addEventListener("submit", salvarFatura);
+    const form = $("formFatura");
+    if (form) form.addEventListener("submit", salvarFatura);
 
-    // modal anexos
-    document
-        .getElementById("modalFechar")
-        .addEventListener("click", () =>
-            document.getElementById("modalAnexos").classList.remove("open")
-        );
-    document
-        .getElementById("modalAnexos")
-        .addEventListener("click", (e) => {
-            if (e.target.id === "modalAnexos") {
-                document.getElementById("modalAnexos").classList.remove("open");
-            }
-        });
+    // modal
+    on("modalFechar", "click", () => {
+      const modal = $("modalAnexos");
+      if (modal) modal.classList.remove("open");
+    });
+    const modal = $("modalAnexos");
+    if (modal) {
+      modal.addEventListener("click", (e) => {
+        if (e.target.id === "modalAnexos") {
+          modal.classList.remove("open");
+        }
+      });
+    }
 
-    // carregamento inicial
+    // carga inicial
     carregarDashboard();
     carregarFaturas();
+  } catch (e) {
+    console.error("Erro na inicialização do app:", e);
+    alert("Erro ao iniciar a página (JavaScript). Veja o console para detalhes.");
+  }
 });
