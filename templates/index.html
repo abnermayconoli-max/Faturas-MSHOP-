@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <title>Faturas Transportadoras</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <div class="logo-area">
-      <span class="logo-badge">M</span>
-      <div class="logo-text">
-        <h1>Faturas Transportadoras</h1>
-        <span class="subtitle">Controle de contas a pagar</span>
+    <div class="topbar-left">
+      <span class="logo-circle">FT</span>
+      <div>
+        <h1>Sistema de Faturas</h1>
+        <p>Transportadoras · Contas a Pagar</p>
       </div>
     </div>
   </header>
@@ -21,82 +22,87 @@
     <button class="tab-button" data-tab="dashboard">Dashboard</button>
   </nav>
 
-  <main>
-    <!-- TAB FATURAS -->
+  <main class="container">
+    <!-- ABA FATURAS -->
     <section id="tab-faturas" class="tab-content active">
-      <section class="filters">
-        <div class="filter-group">
-          <label>Transportadora</label>
-          <input type="text" id="filtro-transportadora" placeholder="Ex: DHL, Garcia..." />
-        </div>
-
-        <div class="filter-group">
-          <label>Até vencimento</label>
-          <input type="date" id="filtro-ate-vencimento" />
-        </div>
-
-        <div class="filter-group">
-          <label>Nº Fatura</label>
-          <input type="text" id="filtro-numero-fatura" placeholder="Pesquisar nº..." />
-        </div>
-
-        <div class="filter-group btns">
-          <button id="btn-filtrar" class="btn primary">Filtrar</button>
-          <button id="btn-limpar" class="btn secondary">Limpar</button>
+      <section class="card filtros">
+        <h2>Filtros</h2>
+        <div class="filtros-grid">
+          <div class="campo">
+            <label for="filtro-transportadora">Transportadora</label>
+            <input id="filtro-transportadora" type="text" placeholder="Ex: DHL, Garcia..." />
+          </div>
+          <div class="campo">
+            <label for="filtro-numero">Número da Fatura</label>
+            <input id="filtro-numero" type="text" placeholder="Ex: 12345" />
+          </div>
+          <div class="campo">
+            <label for="filtro-vencimento">Até vencimento</label>
+            <input id="filtro-vencimento" type="date" />
+          </div>
+          <div class="campo campo-botoes">
+            <button id="btn-filtrar" class="btn btn-primary">Filtrar</button>
+            <button id="btn-limpar" class="btn btn-outline">Limpar</button>
+          </div>
         </div>
       </section>
 
-      <section class="table-card">
-        <div class="table-header">
+      <section class="card">
+        <div class="card-header">
           <h2>Faturas</h2>
-          <button id="btn-recarregar" class="btn ghost">Recarregar</button>
+          <button id="btn-atualizar" class="btn btn-secondary">Atualizar</button>
         </div>
-        <table id="tabela-faturas">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Transportadora</th>
-              <th>Responsável</th>
-              <th>Nº Fatura</th>
-              <th>Valor</th>
-              <th>Vencimento</th>
-              <th>Status</th>
-              <th>Obs.</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- linhas via JS -->
-          </tbody>
-        </table>
+        <div class="tabela-wrapper">
+          <table class="tabela" id="tabela-faturas">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Transportadora</th>
+                <th>Responsável</th>
+                <th>Nº Fatura</th>
+                <th>Valor</th>
+                <th>Vencimento</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- linhas geradas via JS -->
+            </tbody>
+          </table>
+        </div>
       </section>
     </section>
 
-    <!-- TAB DASHBOARD -->
+    <!-- ABA DASHBOARD -->
     <section id="tab-dashboard" class="tab-content">
-      <section class="cards">
-        <article class="card">
-          <span class="card-label">Total em faturas</span>
-          <strong id="card-total">R$ 0,00</strong>
-        </article>
-
-        <article class="card">
-          <span class="card-label">Pendentes</span>
-          <strong id="card-pendentes">R$ 0,00</strong>
-        </article>
-
-        <article class="card">
-          <span class="card-label">Atrasadas</span>
-          <strong id="card-atrasadas">R$ 0,00</strong>
-        </article>
-
-        <article class="card">
-          <span class="card-label">Em dia</span>
-          <strong id="card-em-dia">R$ 0,00</strong>
-        </article>
+      <section class="card">
+        <h2>Resumo Geral</h2>
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Total Faturas</span>
+            <span id="kpi-total" class="kpi-value">R$ 0,00</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Pendentes</span>
+            <span id="kpi-pendentes" class="kpi-value">R$ 0,00</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Atrasadas</span>
+            <span id="kpi-atrasadas" class="kpi-value">R$ 0,00</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Em dia</span>
+            <span id="kpi-em-dia" class="kpi-value">R$ 0,00</span>
+          </div>
+        </div>
       </section>
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <footer class="rodape">
+    <span>Faturas · Mshop</span>
+  </footer>
+
+  <script src="{{ url_for('static', path='app.js') }}"></script>
 </body>
 </html>
