@@ -1,17 +1,10 @@
 from datetime import date
 import os
-from io import BytesIO
-from decimal import Decimal
+import io
+import csv
 
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    UploadFile,
-    File,
-    Form,
-)
-from fastapi.responses import FileResponse, StreamingResponse, Response
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import (
@@ -56,8 +49,11 @@ class FaturaDB(Base):
     data_vencimento = Column(Date)
     status = Column(String, default="pendente")
 
-    # relação com anexos
-    anexos = relationship("AnexoDB", back_populates="fatura", cascade="all, delete-orphan")
+    anexos = relationship(
+        "AnexoDB",
+        back_populates="fatura",
+        cascade="all, delete-orphan",
+    )
 
 
 class AnexoDB(Base):
@@ -65,20 +61,28 @@ class AnexoDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    nome_arquivo = Column(String)
+    filename = Column(String)
     content_type = Column(String)
-    dados = Column(LargeBinary)
+    data = Column(LargeBinary)
 
     fatura = relationship("FaturaDB", back_populates="anexos")
 
 
-# cria tabela de faturas (se ainda não existir) e tabela de anexos
+# Cria tabelas (inclui a nova tabela de anexos, se ainda não existir)
 Base.metadata.create_all(bind=engine)
 
 
 # =========================
 # MODELOS Pydantic
 # =========================
+
+class AnexoOut(BaseModel):
+    id: int
+    filename: str
+
+    class Config:
+        orm_mode = True
+
 
 class FaturaBase(BaseModel):
     transportadora: str
@@ -90,9 +94,14 @@ class FaturaBase(BaseModel):
 
 class FaturaOut(FaturaBase):
     id: int
+    anexos: list[AnexoOut] = []
 
     class Config:
         orm_mode = True
+
+
+class StatusUpdate(BaseModel):
+    status: str
 
 
 # =========================
@@ -116,13 +125,17 @@ app = FastAPI(
     version="0.3.0",
 )
 
-# pasta de arquivos estáticos (nosso front)
+# pasta do front-end
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-@app.get("/")
+# =========================
+# ROTAS BÁSICAS
+# =========================
+
+@app.get("/", response_class=FileResponse)
 def read_root():
-    # abre a tela visual
+    # Carrega o front-end (layout bonitão)
     return FileResponse("static/index.html")
 
 
@@ -132,29 +145,20 @@ def health_check():
 
 
 # =========================
-# FUNÇÕES AUXILIARES
+# ROTAS DE FATURAS (API)
 # =========================
 
-def decimal_to_float(value):
-    if isinstance(value, Decimal):
-        return float(value)
-    return value
-
-
-# =========================
-# ROTAS DE FATURAS
-# =========================
-
-@app.post("/faturas", response_model=FaturaOut)
+@app.post("/api/faturas", response_model=FaturaOut)
 async def criar_fatura(
     transportadora: str = Form(...),
     numero_fatura: str = Form(...),
     valor: float = Form(...),
     data_vencimento: date = Form(...),
     status: str = Form("pendente"),
-    arquivo: UploadFile | None = File(None),
+    arquivos: list[UploadFile] = File([]),
     db: Session = Depends(get_db),
 ):
+    """Cria fatura + salva anexos (arquivos)."""
     db_fatura = FaturaDB(
         transportadora=transportadora,
         numero_fatura=numero_fatura,
@@ -163,37 +167,40 @@ async def criar_fatura(
         status=status,
     )
     db.add(db_fatura)
-    db.commit()
-    db.refresh(db_fatura)
+    db.flush()  # gera o ID da fatura
 
-    # se veio arquivo, salva como anexo
-    if arquivo is not None:
+    # Salvar anexos (se tiver)
+    for arquivo in arquivos:
         conteudo = await arquivo.read()
+        if not conteudo:
+            continue
         anexo = AnexoDB(
             fatura_id=db_fatura.id,
-            nome_arquivo=arquivo.filename,
+            filename=arquivo.filename,
             content_type=arquivo.content_type or "application/octet-stream",
-            dados=conteudo,
+            data=conteudo,
         )
         db.add(anexo)
-        db.commit()
 
+    db.commit()
+    db.refresh(db_fatura)
     return db_fatura
 
 
-@app.get("/faturas", response_model=list[FaturaOut])
+@app.get("/api/faturas", response_model=list[FaturaOut])
 def listar_faturas(
     transportadora: str | None = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(FaturaDB)
+    """Lista faturas, com filtro por transportadora (opcional)."""
+    query = db.query(FaturaDB).order_by(FaturaDB.id)
     if transportadora:
-        query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-    faturas = query.order_by(FaturaDB.id).all()
-    return faturas
+        like = f"%{transportadora}%"
+        query = query.filter(FaturaDB.transportadora.ilike(like))
+    return query.all()
 
 
-@app.get("/faturas/{fatura_id}", response_model=FaturaOut)
+@app.get("/api/faturas/{fatura_id}", response_model=FaturaOut)
 def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -201,160 +208,150 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     return fatura
 
 
-@app.put("/faturas/{fatura_id}", response_model=FaturaOut)
-async def atualizar_fatura(
+@app.put("/api/faturas/{fatura_id}", response_model=FaturaOut)
+def atualizar_fatura(
     fatura_id: int,
-    transportadora: str = Form(...),
-    numero_fatura: str = Form(...),
-    valor: float = Form(...),
-    data_vencimento: date = Form(...),
-    status: str = Form(...),
-    arquivo: UploadFile | None = File(None),
+    dados: FaturaBase,
     db: Session = Depends(get_db),
 ):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    fatura.transportadora = transportadora
-    fatura.numero_fatura = numero_fatura
-    fatura.valor = valor
-    fatura.data_vencimento = data_vencimento
-    fatura.status = status
+    for campo, valor in dados.dict().items():
+        setattr(fatura, campo, valor)
+
     db.commit()
     db.refresh(fatura)
-
-    if arquivo is not None:
-        conteudo = await arquivo.read()
-        # remove anexos antigos e cadastra o novo
-        db.query(AnexoDB).filter(AnexoDB.fatura_id == fatura_id).delete()
-        anexo = AnexoDB(
-            fatura_id=fatura_id,
-            nome_arquivo=arquivo.filename,
-            content_type=arquivo.content_type or "application/octet-stream",
-            dados=conteudo,
-        )
-        db.add(anexo)
-        db.commit()
-
     return fatura
 
 
-@app.patch("/faturas/{fatura_id}/status", response_model=FaturaOut)
-def atualizar_status_fatura(
+@app.patch("/api/faturas/{fatura_id}/status", response_model=FaturaOut)
+def atualizar_status(
     fatura_id: int,
-    status: str,
+    body: StatusUpdate,
     db: Session = Depends(get_db),
 ):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    fatura.status = status
+    fatura.status = body.status
     db.commit()
     db.refresh(fatura)
     return fatura
 
 
-@app.delete("/faturas/{fatura_id}")
+@app.delete("/api/faturas/{fatura_id}")
 def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
     db.delete(fatura)
     db.commit()
-    return {"mensagem": "Fatura deletada com sucesso"}
+    return {"ok": True}
 
 
 # =========================
 # ANEXOS
 # =========================
 
-@app.get("/faturas/{fatura_id}/anexo")
-def baixar_anexo(fatura_id: int, db: Session = Depends(get_db)):
-    anexo = db.query(AnexoDB).filter(AnexoDB.fatura_id == fatura_id).first()
+@app.get("/api/faturas/{fatura_id}/anexos", response_model=list[AnexoOut])
+def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
+    anexos = db.query(AnexoDB).filter(AnexoDB.fatura_id == fatura_id).all()
+    return anexos
+
+
+@app.get("/api/anexos/{anexo_id}/download")
+def download_anexo(anexo_id: int, db: Session = Depends(get_db)):
+    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    headers = {
-        "Content-Disposition": f'attachment; filename="{anexo.nome_arquivo}"'
-    }
-    return Response(anexo.dados, media_type=anexo.content_type, headers=headers)
+    return StreamingResponse(
+        io.BytesIO(anexo.data),
+        media_type=anexo.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{anexo.filename}"'},
+    )
 
 
 # =========================
-# DASHBOARD / RESUMO
+# DASHBOARD
 # =========================
 
-@app.get("/faturas/resumo")
-def resumo_faturas(db: Session = Depends(get_db)):
-    hoje = date.today()
+@app.get("/api/dashboard-resumo")
+def dashboard_resumo(db: Session = Depends(get_db)):
     faturas = db.query(FaturaDB).all()
+    hoje = date.today()
 
-    total_valor = sum(decimal_to_float(f.valor) for f in faturas)
-    pendentes = [f for f in faturas if f.status.lower() == "pendente"]
-    atrasadas = [f for f in pendentes if f.data_vencimento < hoje]
-    em_dia = [f for f in pendentes if f.data_vencimento >= hoje]
+    total_valor = sum(float(f.valor or 0) for f in faturas)
+    pendentes = [f for f in faturas if (f.status or "").lower() == "pendente"]
+    atrasadas = [
+        f for f in faturas
+        if (f.status or "").lower() == "atrasada"
+        or ((f.status or "").lower() == "pendente"
+            and f.data_vencimento
+            and f.data_vencimento < hoje)
+    ]
+    em_dia = [f for f in faturas if f not in atrasadas]
 
-    def aggregate(lista):
+    def resumo(lista):
         return {
             "quantidade": len(lista),
-            "valor": sum(decimal_to_float(f.valor) for f in lista),
+            "valor": sum(float(f.valor or 0) for f in lista),
         }
 
     return {
         "total": {"quantidade": len(faturas), "valor": total_valor},
-        "pendentes": aggregate(pendentes),
-        "atrasadas": aggregate(atrasadas),
-        "em_dia": aggregate(em_dia),
+        "pendentes": resumo(pendentes),
+        "atrasadas": resumo(atrasadas),
+        "em_dia": resumo(em_dia),
     }
 
 
 # =========================
-# EXPORTAR EXCEL
+# EXPORTAR PARA "EXCEL" (CSV)
 # =========================
 
-@app.get("/faturas/exportar")
-def exportar_faturas(
+@app.get("/api/faturas/exportar")
+def exportar_faturas_excel(
     transportadora: str | None = None,
     db: Session = Depends(get_db),
 ):
-    # import aqui dentro para só carregar quando usar a rota
-    from openpyxl import Workbook
-
-    query = db.query(FaturaDB)
+    """
+    Gera um CSV (que o Excel abre normalmente) com as faturas.
+    - Se "transportadora" vier na query, aplica o filtro.
+    """
+    query = db.query(FaturaDB).order_by(FaturaDB.id)
     if transportadora:
-        query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-    faturas = query.order_by(FaturaDB.id).all()
+        like = f"%{transportadora}%"
+        query = query.filter(FaturaDB.transportadora.ilike(like))
+    faturas = query.all()
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Faturas"
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
 
-    ws.append(["ID", "Transportadora", "Número Fatura", "Valor", "Vencimento", "Status"])
+    writer.writerow(
+        ["ID", "Transportadora", "Número Fatura", "Valor", "Data Vencimento", "Status"]
+    )
 
     for f in faturas:
-        ws.append(
+        writer.writerow(
             [
                 f.id,
                 f.transportadora,
                 f.numero_fatura,
-                float(f.valor),
-                f.data_vencimento.strftime("%d/%m/%Y"),
+                float(f.valor or 0),
+                f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
                 f.status,
             ]
         )
 
-    stream = BytesIO()
-    wb.save(stream)
-    stream.seek(0)
+    conteudo = output.getvalue().encode("utf-8-sig")
+    output.close()
 
-    filename = "faturas.xlsx"
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"'
-    }
     return StreamingResponse(
-        stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers=headers,
+        io.BytesIO(conteudo),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="faturas.csv"'},
     )
