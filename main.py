@@ -41,14 +41,14 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Pasta para anexos
+# Pasta para anexos (no disco do container)
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
-
 
 # =========================
 # MODELOS SQLALCHEMY
 # =========================
+
 
 class FaturaDB(Base):
     __tablename__ = "faturas"
@@ -76,20 +76,20 @@ class AnexoDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
     filename = Column(String)       # nome salvo no disco
-    original_name = Column(String)  # nome enviado pelo usuário
+    original_name = Column(String)  # nome de upload
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
     fatura = relationship("FaturaDB", back_populates="anexos")
 
 
-# Cria tabelas (se não existirem)
+# Cria tabelas caso ainda não existam
 Base.metadata.create_all(bind=engine)
-
 
 # =========================
 # MODELOS Pydantic
 # =========================
+
 
 class FaturaBase(BaseModel):
     transportadora: str
@@ -194,7 +194,7 @@ def health_check():
 
 
 # =========================
-# ROTAS DE FATURAS - CRUD
+# ROTAS FATURAS - CRUD
 # =========================
 
 @app.post("/faturas", response_model=FaturaOut)
@@ -225,9 +225,9 @@ def listar_faturas(
 ):
     """
     Lista faturas com filtros opcionais:
-    - transportadora (LIKE)
-    - até data de vencimento
-    - número da fatura (LIKE)
+    - transportadora (like)
+    - ate_vencimento (data máxima)
+    - numero_fatura (like)
     """
     query = db.query(FaturaDB)
 
@@ -240,7 +240,7 @@ def listar_faturas(
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
-    query = query.order_by(FaturaDB.data_vencimento, FaturaDB.id)
+    query = query.order_by(FaturaDB.id)
     return query.all()
 
 
@@ -267,6 +267,7 @@ def atualizar_fatura(
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
+    # Se mudar transportadora, recalcula responsável
     if "transportadora" in data:
         fatura.responsavel = get_responsavel(fatura.transportadora)
 
@@ -293,7 +294,7 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
 
 
 # =========================
-# ANEXOS
+# ROTAS ANEXOS
 # =========================
 
 @app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
@@ -325,7 +326,6 @@ async def upload_anexos(
         anexos_criados.append(anexo_db)
 
     db.commit()
-
     return anexos_criados
 
 
@@ -334,7 +334,6 @@ def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
     return fatura.anexos
 
 
@@ -395,9 +394,6 @@ def exportar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
 ):
-    """
-    Exporta CSV (Excel abre normal).
-    """
     import csv
     import io
 
