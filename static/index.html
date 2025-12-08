@@ -1,426 +1,398 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <title>Sistema de Faturas - MSHOP</title>
-  <style>
-    * { box-sizing: border-box; font-family: Arial, sans-serif; }
-    body {
-      margin: 0;
-      padding: 0;
-      background: #0b0b10;
-      color: #f1f1f1;
-    }
-    header {
-      background: #4b0082;
-      padding: 16px 24px;
-    }
-    header h1 {
-      margin: 0;
-      font-size: 20px;
-    }
-    main {
-      max-width: 1100px;
-      margin: 24px auto;
-      padding: 0 16px 40px;
-    }
-    h2 {
-      margin-top: 32px;
-      font-size: 18px;
-      border-bottom: 1px solid #444;
-      padding-bottom: 4px;
-    }
-    .card {
-      background: #15151f;
-      border-radius: 8px;
-      padding: 16px;
-      margin-top: 12px;
-      box-shadow: 0 0 6px rgba(0,0,0,0.5);
-    }
-    label {
-      display: block;
-      margin-bottom: 6px;
-      font-size: 13px;
-    }
-    input, select {
-      width: 100%;
-      padding: 6px 8px;
-      margin-bottom: 10px;
-      border-radius: 4px;
-      border: 1px solid #333;
-      background: #0f0f18;
-      color: #f1f1f1;
-    }
-    button {
-      padding: 8px 12px;
-      border-radius: 4px;
-      border: none;
-      cursor: pointer;
-      margin-right: 4px;
-      margin-top: 4px;
-    }
-    button.primary {
-      background: #4b0082;
-      color: #fff;
-    }
-    button.danger {
-      background: #b00020;
-      color: #fff;
-    }
-    button.secondary {
-      background: #333;
-      color: #fff;
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-      font-size: 13px;
-    }
-    th, td {
-      border-bottom: 1px solid #333;
-      padding: 6px 8px;
-      text-align: left;
-    }
-    th {
-      background: #181824;
-    }
-    tr:nth-child(even) td {
-      background: #10101a;
-    }
-    .status-pill {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-    }
-    .status-pendente {
-      background: #8a6d3b;
-      color: #fff;
-    }
-    .status-pago {
-      background: #2e7d32;
-      color: #fff;
-    }
-    .status-atrasado {
-      background: #b00020;
-      color: #fff;
-    }
-    .linha-atrasada {
-      background: #311018 !important;
-    }
-    .erro {
-      color: #ff6b6b;
-      margin-top: 6px;
-      font-size: 13px;
-    }
-    .sucesso {
-      color: #2ecc71;
-      margin-top: 6px;
-      font-size: 13px;
-    }
-    .linha-top {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .linha-top span {
-      font-size: 13px;
-      color: #ccc;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Faturas MSHOP</title>
+
+    <!-- Bootstrap (pra facilitar layout bonito) -->
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet"
+    >
+
+    <style>
+        body {
+            background-color: #f5f7f9;
+        }
+
+        .navbar-mshop {
+            background-color: #23a455; /* verde meio termo */
+        }
+
+        .navbar-mshop .navbar-brand {
+            color: #fff;
+            font-weight: 700;
+            font-size: 1.4rem;
+        }
+
+        .navbar-mshop .btn-nav {
+            color: #fff;
+            border-color: #ffffff55;
+        }
+
+        .navbar-mshop .btn-nav.active,
+        .navbar-mshop .btn-nav:hover {
+            background-color: #1e8f49;
+            border-color: #1e8f49;
+            color: #fff;
+        }
+
+        .card-resumo {
+            border: none;
+            border-radius: 12px;
+            background-color: #e7f6ed;
+        }
+
+        .card-resumo h5 {
+            color: #268a4f;
+            font-weight: 600;
+        }
+
+        .card-resumo .valor {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #1e6b3c;
+        }
+
+        .card-resumo .sub {
+            color: #4d6f5a;
+        }
+    </style>
 </head>
 <body>
-  <header>
-    <h1>Sistema de Faturas Transportadoras - MSHOP</h1>
-  </header>
+<nav class="navbar navbar-expand-lg navbar-mshop">
+    <div class="container-fluid">
+        <span class="navbar-brand">Faturas MSHOP</span>
 
-  <main>
-    <section class="card">
-      <div class="linha-top">
-        <h2>Cadastrar / Editar Fatura</h2>
-        <span id="msg-geral"></span>
-      </div>
+        <div class="ms-auto">
+            <button class="btn btn-sm btn-nav me-2" id="btn-aba-faturas"
+                    onclick="mostrarAba('faturas')">
+                Faturas
+            </button>
+            <button class="btn btn-sm btn-nav me-2" id="btn-aba-cadastro"
+                    onclick="mostrarAba('cadastro')">
+                Cadastro
+            </button>
+            <button class="btn btn-sm btn-nav" id="btn-aba-dashboard"
+                    onclick="mostrarAba('dashboard')">
+                Dashboard
+            </button>
+        </div>
+    </div>
+</nav>
 
-      <form id="form-fatura">
-        <input type="hidden" id="fatura-id" />
+<main class="container my-4">
 
-        <label for="transportadora">Transportadora</label>
-        <input type="text" id="transportadora" required />
+    <!-- ABA FATURAS -->
+    <section id="aba-faturas">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h4 mb-0">Faturas</h2>
 
-        <label for="numero_fatura">Número da Fatura</label>
-        <input type="text" id="numero_fatura" required />
+            <button class="btn btn-success"
+                    onclick="exportarExcel()">
+                Exportar Excel (todas as faturas)
+            </button>
+        </div>
 
-        <label for="valor">Valor (R$)</label>
-        <input type="number" step="0.01" id="valor" required />
+        <div class="row g-2 mb-3">
+            <div class="col-md-4">
+                <input id="filtroTransportadora"
+                       type="text"
+                       class="form-control"
+                       placeholder="Filtrar por transportadora">
+            </div>
+            <div class="col-md-4 d-flex gap-2">
+                <button class="btn btn-success" onclick="carregarFaturas()">
+                    Aplicar filtro
+                </button>
+                <button class="btn btn-outline-secondary" onclick="limparFiltro()">
+                    Limpar
+                </button>
+            </div>
+        </div>
 
-        <label for="data_vencimento">Data de Vencimento</label>
-        <input type="date" id="data_vencimento" required />
-
-        <label for="status">Status</label>
-        <select id="status">
-          <option value="pendente">Pendente</option>
-          <option value="pago">Pago</option>
-          <option value="atrasado">Atrasado</option>
-        </select>
-
-        <button type="submit" class="primary" id="btn-salvar">Salvar Fatura</button>
-        <button type="button" class="secondary" id="btn-limpar">Limpar</button>
-        <p id="msg-form" class=""></p>
-      </form>
+        <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle">
+                <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Transportadora</th>
+                    <th>Nº Fatura</th>
+                    <th>Valor</th>
+                    <th>Vencimento</th>
+                    <th>Status</th>
+                </tr>
+                </thead>
+                <tbody id="tabelaFaturasBody">
+                <!-- linhas preenchidas via JS -->
+                </tbody>
+            </table>
+        </div>
     </section>
 
-    <section class="card">
-      <div class="linha-top">
-        <h2>Faturas Cadastradas</h2>
-        <button type="button" class="secondary" id="btn-recarregar">Recarregar Lista</button>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Transportadora</th>
-            <th>Nº Fatura</th>
-            <th>Valor</th>
-            <th>Vencimento</th>
-            <th>Status</th>
-            <th>Ações</th>
-          </tr>
-        </thead>
-        <tbody id="tabela-faturas">
-          <!-- linhas preenchidas via JS -->
-        </tbody>
-      </table>
+    <!-- ABA CADASTRO -->
+    <section id="aba-cadastro" class="d-none">
+        <h2 class="h4 mb-3">Cadastro de Fatura</h2>
+
+        <form id="formCadastro" onsubmit="salvarFatura(event)" class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Transportadora</label>
+                <input type="text" class="form-control" id="cadTransportadora" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Número da Fatura</label>
+                <input type="text" class="form-control" id="cadNumeroFatura" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Valor (R$)</label>
+                <input type="number" step="0.01" min="0"
+                       class="form-control" id="cadValor" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Data de Vencimento</label>
+                <input type="date" class="form-control" id="cadDataVencimento" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Status</label>
+                <select id="cadStatus" class="form-select">
+                    <option value="pendente">Pendente</option>
+                    <option value="paga">Paga</option>
+                    <option value="cancelada">Cancelada</option>
+                </select>
+            </div>
+
+            <div class="col-12 mt-3">
+                <button class="btn btn-success" type="submit">
+                    Salvar Fatura
+                </button>
+            </div>
+        </form>
     </section>
-  </main>
 
-  <script>
-    const API_BASE = ""; // mesmo host da API
+    <!-- ABA DASHBOARD -->
+    <section id="aba-dashboard" class="d-none">
+        <h2 class="h4 mb-3">Dashboard</h2>
 
-    const form = document.getElementById("form-fatura");
-    const inputId = document.getElementById("fatura-id");
-    const inputTransportadora = document.getElementById("transportadora");
-    const inputNumeroFatura = document.getElementById("numero_fatura");
-    const inputValor = document.getElementById("valor");
-    const inputDataVencimento = document.getElementById("data_vencimento");
-    const inputStatus = document.getElementById("status");
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card card-resumo">
+                    <div class="card-body">
+                        <h5>Total</h5>
+                        <div class="valor" id="dashTotalValor">R$ 0,00</div>
+                        <div class="sub">&nbsp;</div>
+                    </div>
+                </div>
+            </div>
 
-    const msgForm = document.getElementById("msg-form");
-    const msgGeral = document.getElementById("msg-geral");
-    const tabelaFaturas = document.getElementById("tabela-faturas");
+            <div class="col-md-3">
+                <div class="card card-resumo">
+                    <div class="card-body">
+                        <h5>Pendentes</h5>
+                        <div class="valor" id="dashPendentesValor">R$ 0,00</div>
+                        <div class="sub" id="dashPendentesQtd">0 faturas</div>
+                    </div>
+                </div>
+            </div>
 
-    const btnLimpar = document.getElementById("btn-limpar");
-    const btnRecarregar = document.getElementById("btn-recarregar");
-    const btnSalvar = document.getElementById("btn-salvar");
+            <div class="col-md-3">
+                <div class="card card-resumo">
+                    <div class="card-body">
+                        <h5>Atrasadas</h5>
+                        <div class="valor" id="dashAtrasadasValor">R$ 0,00</div>
+                        <div class="sub" id="dashAtrasadasQtd">0 faturas</div>
+                    </div>
+                </div>
+            </div>
 
-    function setMensagemForm(texto, tipo) {
-      msgForm.textContent = texto || "";
-      msgForm.className = tipo === "erro" ? "erro" : tipo === "sucesso" ? "sucesso" : "";
+            <div class="col-md-3">
+                <div class="card card-resumo">
+                    <div class="card-body">
+                        <h5>Em dia</h5>
+                        <div class="valor" id="dashEmDiaValor">R$ 0,00</div>
+                        <div class="sub" id="dashEmDiaQtd">0 faturas</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-success" onclick="carregarDashboard()">
+                Atualizar Dashboard
+            </button>
+
+            <button class="btn btn-outline-success" onclick="exportarExcel()">
+                Exportar Excel (todas as faturas)
+            </button>
+        </div>
+    </section>
+</main>
+
+<script>
+    function formatarMoeda(valor) {
+        return valor.toLocaleString('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+        });
     }
 
-    function setMensagemGeral(texto) {
-      msgGeral.textContent = texto || "";
-    }
+    function mostrarAba(nome) {
+        const abas = ['faturas', 'cadastro', 'dashboard'];
 
-    function limparFormulario() {
-      inputId.value = "";
-      inputTransportadora.value = "";
-      inputNumeroFatura.value = "";
-      inputValor.value = "";
-      inputDataVencimento.value = "";
-      inputStatus.value = "pendente";
-      setMensagemForm("", "");
-      btnSalvar.textContent = "Salvar Fatura";
+        abas.forEach(aba => {
+            const sec = document.getElementById('aba-' + aba);
+            const btn = document.getElementById('btn-aba-' + aba);
+
+            if (aba === nome) {
+                sec.classList.remove('d-none');
+                btn.classList.add('active');
+            } else {
+                sec.classList.add('d-none');
+                btn.classList.remove('active');
+            }
+        });
+
+        if (nome === 'dashboard') {
+            carregarDashboard();
+        }
+        if (nome === 'faturas') {
+            carregarFaturas();
+        }
     }
 
     async function carregarFaturas() {
-      setMensagemGeral("Carregando faturas...");
-      tabelaFaturas.innerHTML = "";
+        const filtro = document.getElementById('filtroTransportadora').value.trim();
 
-      try {
-        const resp = await fetch(`${API_BASE}/faturas`);
+        let url = '/faturas';
+        if (filtro) {
+            url += '?transportadora=' + encodeURIComponent(filtro);
+        }
+
+        const resp = await fetch(url);
         if (!resp.ok) {
-          throw new Error("Erro ao buscar faturas");
+            alert('Erro ao carregar faturas');
+            return;
         }
+
         const dados = await resp.json();
-        preencherTabela(dados);
-        setMensagemGeral(`Total de faturas: ${dados.length}`);
-      } catch (erro) {
-        console.error(erro);
-        setMensagemGeral("Erro ao carregar faturas.");
-      }
-    }
+        const tbody = document.getElementById('tabelaFaturasBody');
+        tbody.innerHTML = '';
 
-    function preencherTabela(lista) {
-      tabelaFaturas.innerHTML = "";
-
-      const hoje = new Date();
-      lista.forEach((fatura) => {
-        const tr = document.createElement("tr");
-
-        const venc = new Date(fatura.data_vencimento);
-        const vencAtrasado = venc < hoje && fatura.status !== "pago";
-
-        if (vencAtrasado) {
-          tr.classList.add("linha-atrasada");
+        if (!dados.length) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 6;
+            td.className = 'text-center text-muted';
+            td.textContent = 'Nenhuma fatura encontrada.';
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+            return;
         }
 
-        tr.innerHTML = `
-          <td>${fatura.id}</td>
-          <td>${fatura.transportadora}</td>
-          <td>${fatura.numero_fatura}</td>
-          <td>R$ ${Number(fatura.valor).toFixed(2)}</td>
-          <td>${formatarData(fatura.data_vencimento)}</td>
-          <td>${renderStatus(fatura.status)}</td>
-          <td>
-            <button class="secondary btn-editar" data-id="${fatura.id}">Editar</button>
-            <button class="danger btn-excluir" data-id="${fatura.id}">Excluir</button>
-            <button class="primary btn-marcar-pago" data-id="${fatura.id}">Marcar Pago</button>
-          </td>
-        `;
+        dados.forEach(f => {
+            const tr = document.createElement('tr');
 
-        tabelaFaturas.appendChild(tr);
-      });
+            const tdId = document.createElement('td');
+            tdId.textContent = f.id;
 
-      document.querySelectorAll(".btn-editar").forEach((btn) => {
-        btn.addEventListener("click", () => carregarFaturaParaEdicao(btn.dataset.id));
-      });
-      document.querySelectorAll(".btn-excluir").forEach((btn) => {
-        btn.addEventListener("click", () => excluirFatura(btn.dataset.id));
-      });
-      document.querySelectorAll(".btn-marcar-pago").forEach((btn) => {
-        btn.addEventListener("click", () => marcarComoPago(btn.dataset.id));
-      });
+            const tdTransp = document.createElement('td');
+            tdTransp.textContent = f.transportadora;
+
+            const tdNum = document.createElement('td');
+            tdNum.textContent = f.numero_fatura;
+
+            const tdValor = document.createElement('td');
+            tdValor.textContent = formatarMoeda(f.valor);
+
+            const tdVenc = document.createElement('td');
+            tdVenc.textContent = f.data_vencimento;
+
+            const tdStatus = document.createElement('td');
+            tdStatus.textContent = f.status;
+
+            tr.appendChild(tdId);
+            tr.appendChild(tdTransp);
+            tr.appendChild(tdNum);
+            tr.appendChild(tdValor);
+            tr.appendChild(tdVenc);
+            tr.appendChild(tdStatus);
+
+            tbody.appendChild(tr);
+        });
     }
 
-    function renderStatus(status) {
-      let classe = "status-pendente";
-      if (status === "pago") classe = "status-pago";
-      if (status === "atrasado") classe = "status-atrasado";
-      return `<span class="status-pill ${classe}">${status}</span>`;
-    }
-
-    function formatarData(dataIso) {
-      if (!dataIso) return "";
-      const d = new Date(dataIso);
-      const dia = String(d.getDate()).padStart(2, "0");
-      const mes = String(d.getMonth() + 1).padStart(2, "0");
-      const ano = d.getFullYear();
-      return `${dia}/${mes}/${ano}`;
+    function limparFiltro() {
+        document.getElementById('filtroTransportadora').value = '';
+        carregarFaturas();
     }
 
     async function salvarFatura(event) {
-      event.preventDefault();
-      setMensagemForm("", "");
+        event.preventDefault();
 
-      const corpo = {
-        transportadora: inputTransportadora.value.trim(),
-        numero_fatura: inputNumeroFatura.value.trim(),
-        valor: Number(inputValor.value),
-        data_vencimento: inputDataVencimento.value,
-        status: inputStatus.value,
-      };
+        const corpo = {
+            transportadora: document.getElementById('cadTransportadora').value,
+            numero_fatura: document.getElementById('cadNumeroFatura').value,
+            valor: parseFloat(document.getElementById('cadValor').value),
+            data_vencimento: document.getElementById('cadDataVencimento').value,
+            status: document.getElementById('cadStatus').value,
+        };
 
-      if (!corpo.transportadora || !corpo.numero_fatura || !corpo.valor || !corpo.data_vencimento) {
-        setMensagemForm("Preencha todos os campos obrigatórios.", "erro");
-        return;
-      }
-
-      const id = inputId.value;
-      const metodo = id ? "PUT" : "POST";
-      const url = id ? `${API_BASE}/faturas/${id}` : `${API_BASE}/faturas`;
-
-      btnSalvar.disabled = true;
-
-      try {
-        const resp = await fetch(url, {
-          method: metodo,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(corpo),
+        const resp = await fetch('/faturas', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(corpo),
         });
 
         if (!resp.ok) {
-          const erro = await resp.json().catch(() => ({}));
-          console.error(erro);
-          throw new Error("Erro ao salvar fatura");
+            alert('Erro ao salvar fatura');
+            return;
         }
 
-        await resp.json();
-        setMensagemForm("Fatura salva com sucesso!", "sucesso");
-        limparFormulario();
-        carregarFaturas();
-      } catch (erro) {
-        console.error(erro);
-        setMensagemForm("Erro ao salvar fatura.", "erro");
-      } finally {
-        btnSalvar.disabled = false;
-      }
+        document.getElementById('formCadastro').reset();
+        alert('Fatura salva com sucesso!');
+        mostrarAba('faturas');
     }
 
-    async function carregarFaturaParaEdicao(id) {
-      try {
-        const resp = await fetch(`${API_BASE}/faturas/${id}`);
-        if (!resp.ok) throw new Error("Erro ao buscar fatura");
-        const f = await resp.json();
+    async function carregarDashboard() {
+        const resp = await fetch('/dashboard/resumo');
+        if (!resp.ok) {
+            alert('Erro ao carregar dashboard');
+            return;
+        }
 
-        inputId.value = f.id;
-        inputTransportadora.value = f.transportadora;
-        inputNumeroFatura.value = f.numero_fatura;
-        inputValor.value = f.valor;
-        inputDataVencimento.value = f.data_vencimento;
-        inputStatus.value = f.status;
+        const dados = await resp.json();
 
-        btnSalvar.textContent = "Atualizar Fatura";
-        setMensagemForm("Fatura carregada para edição.", "sucesso");
-      } catch (erro) {
-        console.error(erro);
-        setMensagemForm("Erro ao carregar fatura para edição.", "erro");
-      }
+        document.getElementById('dashTotalValor').textContent =
+            formatarMoeda(dados.valor_total);
+
+        document.getElementById('dashPendentesValor').textContent =
+            formatarMoeda(dados.pendentes.valor);
+        document.getElementById('dashPendentesQtd').textContent =
+            `${dados.pendentes.qtd} faturas`;
+
+        document.getElementById('dashAtrasadasValor').textContent =
+            formatarMoeda(dados.atrasadas.valor);
+        document.getElementById('dashAtrasadasQtd').textContent =
+            `${dados.atrasadas.qtd} faturas`;
+
+        document.getElementById('dashEmDiaValor').textContent =
+            formatarMoeda(dados.em_dia.valor);
+        document.getElementById('dashEmDiaQtd').textContent =
+            `${dados.em_dia.qtd} faturas`;
     }
 
-    async function excluirFatura(id) {
-      if (!confirm("Tem certeza que deseja excluir esta fatura?")) return;
-
-      try {
-        const resp = await fetch(`${API_BASE}/faturas/${id}`, {
-          method: "DELETE",
-        });
-        if (!resp.ok) throw new Error("Erro ao excluir fatura");
-        carregarFaturas();
-        setMensagemGeral("Fatura excluída com sucesso.");
-      } catch (erro) {
-        console.error(erro);
-        setMensagemGeral("Erro ao excluir fatura.");
-      }
+    function exportarExcel() {
+        // o browser já inicia o download do arquivo .xlsx
+        window.location.href = '/faturas/exportar-excel';
     }
 
-    async function marcarComoPago(id) {
-      try {
-        const resp = await fetch(`${API_BASE}/faturas/${id}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "pago" }),
-        });
-        if (!resp.ok) throw new Error("Erro ao atualizar status");
-        carregarFaturas();
-        setMensagemGeral("Fatura marcada como paga.");
-      } catch (erro) {
-        console.error(erro);
-        setMensagemGeral("Erro ao marcar fatura como paga.");
-      }
-    }
-
-    form.addEventListener("submit", salvarFatura);
-    btnLimpar.addEventListener("click", limparFormulario);
-    btnRecarregar.addEventListener("click", carregarFaturas);
-
-    window.addEventListener("load", carregarFaturas);
-  </script>
+    // Ao carregar a página, abre direto o Dashboard
+    document.addEventListener('DOMContentLoaded', () => {
+        mostrarAba('dashboard');
+    });
+</script>
 </body>
 </html>
