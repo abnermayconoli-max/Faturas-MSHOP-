@@ -1,13 +1,14 @@
 :root {
-  /* azul um pouco mais claro */
-  --primary: #2563eb;
-  --primary-dark: #1d4ed8;
+  /* verde no lugar do azul */
+  --primary: #22c55e;         /* Verde claro */
+  --primary-dark: #16a34a;    /* Verde mais forte */
   --bg: #0b1120;
   --bg-card: #0f172a;
   --border: #1f2937;
   --text: #e5e7eb;
   --text-muted: #9ca3af;
 }
+
 
 * {
   box-sizing: border-box;
