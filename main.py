@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 import os
 import uuid
 from typing import List, Optional
@@ -10,11 +10,11 @@ from fastapi import (
     UploadFile,
     File,
     Query,
+    Request,
 )
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -45,10 +45,10 @@ Base = declarative_base()
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
 
-# =========================
-# MODELO SQLALCHEMY
-# =========================
 
+# =========================
+# MODELOS SQLALCHEMY
+# =========================
 
 class FaturaDB(Base):
     __tablename__ = "faturas"
@@ -76,7 +76,7 @@ class AnexoDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
     filename = Column(String)       # nome salvo no disco
-    original_name = Column(String)  # nome do arquivo que o usuário enviou
+    original_name = Column(String)  # nome enviado pelo usuário
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
@@ -88,7 +88,7 @@ Base.metadata.create_all(bind=engine)
 
 
 # =========================
-# Pydantic
+# MODELOS Pydantic
 # =========================
 
 class FaturaBase(BaseModel):
@@ -152,7 +152,6 @@ RESP_MAP = {
 
 
 def get_responsavel(transportadora: str) -> Optional[str]:
-    # Tenta bater nome exato, depois só primeira parte
     if transportadora in RESP_MAP:
         return RESP_MAP[transportadora]
     base = transportadora.split("-")[0].strip()
@@ -180,10 +179,7 @@ app = FastAPI(
     version="0.4.0",
 )
 
-# /static -> arquivos estáticos (css/js)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# / -> template Jinja
 templates = Jinja2Templates(directory="templates")
 
 
@@ -229,9 +225,9 @@ def listar_faturas(
 ):
     """
     Lista faturas com filtros opcionais:
-    - transportadora (contains)
-    - ate_vencimento (data vencimento <=)
-    - numero_fatura (contains)
+    - transportadora (LIKE)
+    - até data de vencimento
+    - número da fatura (LIKE)
     """
     query = db.query(FaturaDB)
 
@@ -244,7 +240,7 @@ def listar_faturas(
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
-    query = query.order_by(FaturaDB.id)
+    query = query.order_by(FaturaDB.data_vencimento, FaturaDB.id)
     return query.all()
 
 
@@ -271,7 +267,6 @@ def atualizar_fatura(
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
-    # Se mudar transportadora, recalcula responsável
     if "transportadora" in data:
         fatura.responsavel = get_responsavel(fatura.transportadora)
 
@@ -399,7 +394,6 @@ def resumo_dashboard(db: Session = Depends(get_db)):
 def exportar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    numero_fatura: Optional[str] = Query(None),
 ):
     """
     Exporta CSV (Excel abre normal).
@@ -410,8 +404,6 @@ def exportar_faturas(
     query = db.query(FaturaDB)
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-    if numero_fatura:
-        query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
     faturas = query.order_by(FaturaDB.id).all()
 
