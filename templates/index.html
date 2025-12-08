@@ -248,3 +248,261 @@
                 id="valor"
                 name="valor"
                 type="number"
+                step="0.01"
+                min="0"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="data_vencimento">Data de vencimento</label>
+              <input
+                id="data_vencimento"
+                name="data_vencimento"
+                type="date"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="status">Status</label>
+              <select id="status" name="status">
+                <option value="pendente" selected>Pendente</option>
+                <option value="pago">Pago</option>
+                <option value="cancelado">Cancelado</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn-primary" type="submit">Salvar Fatura</button>
+        </form>
+      </section>
+
+      <section>
+        <div class="filters">
+          <h2 style="margin:0;font-size:16px;">Faturas cadastradas</h2>
+          <button class="btn-secondary" type="button" onclick="carregarFaturas()">
+            Todas
+          </button>
+          <button
+            class="btn-secondary"
+            type="button"
+            onclick="carregarFaturasAtrasadas()"
+          >
+            Apenas atrasadas
+          </button>
+          <span class="small" id="info-filtro"></span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Transportadora</th>
+              <th>Nº Fatura</th>
+              <th>Vencimento</th>
+              <th>Valor</th>
+              <th>Status</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-faturas">
+            <!-- dados via JS -->
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      async function checarSaudeAPI() {
+        try {
+          const resp = await fetch("/health");
+          if (!resp.ok) throw new Error();
+          const dados = await resp.json();
+          const span = document.getElementById("api-status");
+          span.textContent = dados.status === "ok" ? "Online" : "Indefinido";
+        } catch (e) {
+          document.getElementById("api-status").textContent = "Offline";
+        }
+      }
+
+      function formatarValor(valor) {
+        return valor.toLocaleString("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        });
+      }
+
+      function formatarData(iso) {
+        if (!iso) return "";
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        return d.toLocaleDateString("pt-BR");
+      }
+
+      function badgeStatus(status) {
+        const classe =
+          status === "pago"
+            ? "status-pago"
+            : status === "cancelado"
+            ? "status-cancelado"
+            : "status-pendente";
+        return `<span class="status-badge ${classe}">${status}</span>`;
+      }
+
+      function atualizarKPIs(faturas) {
+        const total = faturas.length;
+        const valorTotal = faturas.reduce((acc, f) => acc + Number(f.valor), 0);
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const atrasadas = faturas.filter((f) => {
+          const d = new Date(f.data_vencimento);
+          d.setHours(0, 0, 0, 0);
+          return d < hoje && f.status !== "pago";
+        }).length;
+        const pendentes = faturas.filter((f) => f.status === "pendente").length;
+
+        document.getElementById("kpi-total").textContent = total;
+        document.getElementById("kpi-valor-total").textContent =
+          formatarValor(valorTotal);
+        document.getElementById("kpi-pendentes").textContent = pendentes;
+        document.getElementById("kpi-atrasadas").textContent = atrasadas;
+      }
+
+      function preencherTabela(faturas) {
+        const tbody = document.getElementById("tbody-faturas");
+        tbody.innerHTML = "";
+
+        if (!faturas.length) {
+          const tr = document.createElement("tr");
+          const td = document.createElement("td");
+          td.colSpan = 7;
+          td.textContent = "Nenhuma fatura encontrada.";
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+          atualizarKPIs([]);
+          return;
+        }
+
+        faturas.forEach((f) => {
+          const tr = document.createElement("tr");
+
+          tr.innerHTML = `
+            <td>${f.id}</td>
+            <td>${f.transportadora}</td>
+            <td>${f.numero_fatura}</td>
+            <td>${formatarData(f.data_vencimento)}</td>
+            <td>${formatarValor(Number(f.valor))}</td>
+            <td>${badgeStatus(f.status)}</td>
+            <td class="actions">
+              <button class="btn-secondary" onclick="atualizarStatus(${f.id}, 'pago')">Marcar pago</button>
+              <button class="btn-secondary" onclick="atualizarStatus(${f.id}, 'pendente')">Pendente</button>
+              <button class="btn-secondary" onclick="atualizarStatus(${f.id}, 'cancelado')">Cancelar</button>
+              <button class="btn-danger" onclick="deletarFatura(${f.id})">Excluir</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        atualizarKPIs(faturas);
+      }
+
+      async function carregarFaturas() {
+        document.getElementById("info-filtro").textContent = "Mostrando todas";
+        try {
+          const resp = await fetch("/faturas");
+          const dados = await resp.json();
+          preencherTabela(dados);
+        } catch (e) {
+          alert("Erro ao carregar faturas");
+        }
+      }
+
+      async function carregarFaturasAtrasadas() {
+        document.getElementById("info-filtro").textContent =
+          "Mostrando apenas atrasadas";
+        try {
+          const resp = await fetch("/faturas/atrasadas");
+          const dados = await resp.json();
+          preencherTabela(dados);
+        } catch (e) {
+          alert("Erro ao carregar faturas atrasadas");
+        }
+      }
+
+      async function criarFatura(evento) {
+        evento.preventDefault();
+        const form = document.getElementById("form-fatura");
+        const dados = {
+          transportadora: form.transportadora.value,
+          numero_fatura: form.numero_fatura.value,
+          valor: Number(form.valor.value),
+          data_vencimento: form.data_vencimento.value,
+          status: form.status.value,
+        };
+
+        try {
+          const resp = await fetch("/faturas", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(dados),
+          });
+          if (!resp.ok) {
+            const erro = await resp.json();
+            alert("Erro ao salvar fatura: " + (erro.detail || resp.statusText));
+            return;
+          }
+          form.reset();
+          form.status.value = "pendente";
+          carregarFaturas();
+        } catch (e) {
+          alert("Erro de comunicação com a API");
+        }
+      }
+
+      async function atualizarStatus(id, status) {
+        if (!confirm("Confirmar alteração de status?")) return;
+        try {
+          const resp = await fetch(`/faturas/${id}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          });
+          if (!resp.ok) {
+            const erro = await resp.json();
+            alert(
+              "Erro ao atualizar status: " + (erro.detail || resp.statusText)
+            );
+            return;
+          }
+          carregarFaturas();
+        } catch (e) {
+          alert("Erro de comunicação com a API");
+        }
+      }
+
+      async function deletarFatura(id) {
+        if (!confirm("Tem certeza que deseja excluir esta fatura?")) return;
+        try {
+          const resp = await fetch(`/faturas/${id}`, {
+            method: "DELETE",
+          });
+          if (!resp.ok) {
+            const erro = await resp.json();
+            alert(
+              "Erro ao excluir fatura: " + (erro.detail || resp.statusText)
+            );
+            return;
+          }
+          carregarFaturas();
+        } catch (e) {
+          alert("Erro de comunicação com a API");
+        }
+      }
+
+      document
+        .getElementById("form-fatura")
+        .addEventListener("submit", criarFatura);
+
+      checarSaudeAPI();
+      carregarFaturas();
+    </script>
+  </body>
+</html>
