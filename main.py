@@ -1,9 +1,10 @@
 from datetime import date
 import os
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -99,29 +100,39 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.2.0",
+    version="0.3.0",
 )
 
-templates = Jinja2Templates(directory="templates")
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+# Servir arquivos estáticos (index.html, css, js se tiver)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # =========================
-# ROTAS VISUAIS (HTML)
+# ROTAS BÁSICAS
 # =========================
-
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    # Tela principal (dashboard)
-    return templates.TemplateResponse("index.html", {"request": request})
-
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
 
+@app.get("/", response_class=HTMLResponse)
+def home():
+    """
+    Se existir o static/index.html, mostra a tela visual.
+    Senão, mostra só uma mensagem simples.
+    """
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return index_file.read_text(encoding="utf-8")
+    return "<h1>Sistema de Faturas - API</h1><p>Crie o arquivo static/index.html.</p>"
+
+
 # =========================
-# ROTAS DE FATURAS - API
+# ROTAS DE FATURAS - CRUD
 # =========================
 
 @app.post("/faturas", response_model=FaturaOut)
@@ -145,18 +156,6 @@ def listar_faturas(db: Session = Depends(get_db)):
     return faturas
 
 
-@app.get("/faturas/atrasadas", response_model=list[FaturaOut])
-def listar_faturas_atrasadas(db: Session = Depends(get_db)):
-    hoje = date.today()
-    faturas = (
-        db.query(FaturaDB)
-        .filter(FaturaDB.data_vencimento < hoje, FaturaDB.status != "pago")
-        .order_by(FaturaDB.data_vencimento)
-        .all()
-    )
-    return faturas
-
-
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
 def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
@@ -166,30 +165,17 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
-def atualizar_fatura(
-    fatura_id: int, dados: FaturaUpdate, db: Session = Depends(get_db)
-):
+def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    for campo, valor in dados.dict().items():
-        setattr(fatura, campo, valor)
-
-    db.commit()
-    db.refresh(fatura)
-    return fatura
-
-
-@app.patch("/faturas/{fatura_id}/status", response_model=FaturaOut)
-def atualizar_status_fatura(
-    fatura_id: int, dados: FaturaStatusUpdate, db: Session = Depends(get_db)
-):
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
+    fatura.transportadora = dados.transportadora
+    fatura.numero_fatura = dados.numero_fatura
+    fatura.valor = dados.valor
+    fatura.data_vencimento = dados.data_vencimento
     fatura.status = dados.status
+
     db.commit()
     db.refresh(fatura)
     return fatura
@@ -203,4 +189,35 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
 
     db.delete(fatura)
     db.commit()
-    return {"mensagem": "Fatura deletada com sucesso"}
+    return {"ok": True}
+
+
+@app.patch("/faturas/{fatura_id}/status", response_model=FaturaOut)
+def atualizar_status_fatura(
+    fatura_id: int,
+    body: FaturaStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
+    if not fatura:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+
+    fatura.status = body.status
+    db.commit()
+    db.refresh(fatura)
+    return fatura
+
+
+@app.get("/faturas/atrasadas", response_model=list[FaturaOut])
+def listar_faturas_atrasadas(db: Session = Depends(get_db)):
+    hoje = date.today()
+    faturas = (
+        db.query(FaturaDB)
+        .filter(
+            FaturaDB.data_vencimento < hoje,
+            FaturaDB.status != "pago",
+        )
+        .order_by(FaturaDB.data_vencimento)
+        .all()
+    )
+    return faturas
