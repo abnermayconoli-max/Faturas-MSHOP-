@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <title>Faturas MSHOP</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}" />
+    <script src="{{ url_for('static', path='app.js') }}" defer></script>
+</head>
+<body>
+    <header class="topo">
+        <h1>Faturas MSHOP</h1>
+    </header>
+
+    <main class="container">
+        <!-- Abas -->
+        <nav class="tabs">
+            <button class="tab-button active" data-tab="lista">Lista de Faturas</button>
+            <button class="tab-button" data-tab="cadastro">Cadastro de Fatura</button>
+            <button class="tab-button" data-tab="dashboard">Dashboard</button>
+        </nav>
+
+        <!-- ======================= -->
+        <!-- TAB LISTA DE FATURAS    -->
+        <!-- ======================= -->
+        <section id="tab-lista" class="tab-content active">
+            <div class="card">
+                <h2>Lista de Faturas</h2>
+
+                <div class="filtros">
+                    <div class="campo">
+                        <label for="filtro-transportadora">Filtrar por transportadora:</label>
+                        <input
+                            type="text"
+                            id="filtro-transportadora"
+                            placeholder="Ex: DHL, Transbritto..."
+                        />
+                    </div>
+                    <div class="botoes-filtro">
+                        <button id="btn-filtrar" class="btn">Aplicar filtro</button>
+                        <button id="btn-limpar-filtro" class="btn btn-secundario">Limpar</button>
+                    </div>
+                </div>
+
+                <div class="acoes-tabela">
+                    <button id="btn-exportar-filtro" class="btn">
+                        Exportar lista (Excel)
+                    </button>
+                    <button id="btn-exportar-todas" class="btn btn-secundario">
+                        Exportar todas (Excel)
+                    </button>
+                </div>
+
+                <div class="tabela-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Transportadora</th>
+                                <th>Nº Fatura</th>
+                                <th>Valor</th>
+                                <th>Vencimento</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabela-faturas">
+                            <!-- linhas preenchidas via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ======================= -->
+        <!-- TAB CADASTRO            -->
+        <!-- ======================= -->
+        <section id="tab-cadastro" class="tab-content">
+            <div class="card">
+                <h2>Cadastro de Fatura</h2>
+
+                <form id="form-cadastro" class="form-grid">
+                    <div class="campo">
+                        <label for="cad-transportadora">Transportadora</label>
+                        <input
+                            type="text"
+                            id="cad-transportadora"
+                            required
+                        />
+                    </div>
+
+                    <div class="campo">
+                        <label for="cad-numero">Número da Fatura</label>
+                        <input
+                            type="text"
+                            id="cad-numero"
+                            required
+                        />
+                    </div>
+
+                    <div class="campo">
+                        <label for="cad-valor">Valor</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            id="cad-valor"
+                            required
+                        />
+                    </div>
+
+                    <div class="campo">
+                        <label for="cad-vencimento">Data de Vencimento</label>
+                        <input
+                            type="date"
+                            id="cad-vencimento"
+                            required
+                        />
+                    </div>
+
+                    <div class="campo">
+                        <label for="cad-status">Status</label>
+                        <select id="cad-status">
+                            <option value="pendente">Pendente</option>
+                            <option value="atrasado">Atrasado</option>
+                            <option value="em_dia">Em dia</option>
+                            <option value="pago">Pago</option>
+                        </select>
+                    </div>
+
+                    <div class="campo botoes-form">
+                        <button type="submit" class="btn">
+                            Salvar Fatura
+                        </button>
+                    </div>
+                </form>
+
+                <p id="msg-cadastro" class="mensagem"></p>
+            </div>
+        </section>
+
+        <!-- ======================= -->
+        <!-- TAB DASHBOARD           -->
+        <!-- ======================= -->
+        <section id="tab-dashboard" class="tab-content">
+            <div class="card">
+                <h2>Dashboard de Faturas</h2>
+
+                <div class="cards-dashboard">
+                    <div class="dash-card">
+                        <span>Total de Faturas</span>
+                        <strong id="dash-total-faturas">0</strong>
+                    </div>
+                    <div class="dash-card">
+                        <span>Valor Total</span>
+                        <strong id="dash-total-valor">R$ 0,00</strong>
+                    </div>
+                    <div class="dash-card">
+                        <span>Total Pendente</span>
+                        <strong id="dash-total-pendente">R$ 0,00</strong>
+                    </div>
+                    <div class="dash-card">
+                        <span>Total Atrasado</span>
+                        <strong id="dash-total-atrasado">R$ 0,00</strong>
+                    </div>
+                    <div class="dash-card">
+                        <span>Total Em Dia</span>
+                        <strong id="dash-total-em-dia">R$ 0,00</strong>
+                    </div>
+                </div>
+
+                <div class="acoes-tabela">
+                    <!-- aqui usamos o mesmo endpoint de exportação de TODAS -->
+                    <button id="btn-exportar-dashboard" class="btn">
+                        Exportar todas as faturas (Excel)
+                    </button>
+                </div>
+
+                <p class="legenda-dashboard">
+                    Os valores acima consideram todas as faturas cadastradas no sistema.
+                </p>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
