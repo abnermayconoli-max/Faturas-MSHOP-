@@ -1,148 +1,199 @@
-// --------- Troca de abas ---------
-const tabButtons = document.querySelectorAll(".tab-btn");
-const tabContents = document.querySelectorAll(".tab-content");
+// ---- Navegação entre abas ----
+const pages = {
+    dashboard: document.getElementById("page-dashboard"),
+    faturas: document.getElementById("page-faturas"),
+    cadastro: document.getElementById("page-cadastro"),
+};
 
-tabButtons.forEach((btn) => {
+document.querySelectorAll(".menu-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-        const tab = btn.dataset.tab;
+        const page = btn.dataset.page;
 
-        tabContents.forEach((sec) => sec.classList.remove("ativo"));
-        document.getElementById(`tab-${tab}`).classList.add("ativo");
+        document.querySelectorAll(".menu-btn").forEach((b) =>
+            b.classList.remove("active")
+        );
+        btn.classList.add("active");
+
+        Object.entries(pages).forEach(([name, el]) => {
+            el.classList.toggle("visible", name === page);
+        });
+
+        if (page === "dashboard") {
+            carregarDashboard();
+        } else if (page === "faturas") {
+            carregarFaturas();
+        }
     });
 });
 
-// --------- Lista de faturas ---------
-const tabelaFaturas = document.getElementById("tabelaFaturas");
-const filtroTransportadora = document.getElementById("filtroTransportadora");
-const btnFiltrar = document.getElementById("btnFiltrar");
-const btnLimpar = document.getElementById("btnLimpar");
-const btnExportarFiltro = document.getElementById("btnExportarFiltro");
-const btnExportarTodas = document.getElementById("btnExportarTodas");
+// ---- Util ----
+function formatarValor(valor) {
+    return valor.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+        minimumFractionDigits: 2,
+    });
+}
+
+function formatarDataISOparaBR(dataIso) {
+    if (!dataIso) return "";
+    const [ano, mes, dia] = dataIso.split("-");
+    return `${dia}/${mes}/${ano}`;
+}
+
+// ---- Dashboard ----
+
+async function carregarDashboard() {
+    try {
+        const resp = await fetch("/dashboard-resumo");
+        if (!resp.ok) throw new Error("Erro ao buscar resumo");
+        const data = await resp.json();
+
+        document.getElementById("total-valor").textContent = formatarValor(
+            data.total.valor || 0
+        );
+        document.getElementById(
+            "total-qtd"
+        ).textContent = `${data.total.quantidade || 0} faturas`;
+
+        document.getElementById("pendentes-qtd").textContent =
+            data.pendentes.quantidade || 0;
+        document.getElementById("pendentes-valor").textContent = formatarValor(
+            data.pendentes.valor || 0
+        );
+
+        document.getElementById("atrasadas-qtd").textContent =
+            data.atrasadas.quantidade || 0;
+        document.getElementById("atrasadas-valor").textContent = formatarValor(
+            data.atrasadas.valor || 0
+        );
+
+        document.getElementById("emdia-qtd").textContent =
+            data.em_dia.quantidade || 0;
+        document.getElementById("emdia-valor").textContent = formatarValor(
+            data.em_dia.valor || 0
+        );
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao carregar dashboard.");
+    }
+}
+
+document
+    .getElementById("btn-atualizar-dashboard")
+    .addEventListener("click", carregarDashboard);
+
+document
+    .getElementById("btn-exportar-excel-dashboard")
+    .addEventListener("click", () => {
+        window.location.href = "/faturas/exportar";
+    });
+
+// ---- Lista de faturas ----
 
 async function carregarFaturas() {
+    const filtro = document.getElementById("filtro-transportadora").value.trim();
     let url = "/faturas";
-
-    const transportadora = filtroTransportadora.value.trim();
-    if (transportadora) {
-        const params = new URLSearchParams({ transportadora });
-        url += "?" + params.toString();
+    if (filtro) {
+        const params = new URLSearchParams({ transportadora: filtro });
+        url += `?${params.toString()}`;
     }
 
-    const resp = await fetch(url);
-    const dados = await resp.json();
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error("Erro ao buscar faturas");
+        const lista = await resp.json();
 
-    tabelaFaturas.innerHTML = "";
+        const tbody = document.querySelector("#tabela-faturas tbody");
+        tbody.innerHTML = "";
 
-    dados.forEach((f) => {
-        const tr = document.createElement("tr");
+        if (!lista.length) {
+            const tr = document.createElement("tr");
+            const td = document.createElement("td");
+            td.colSpan = 6;
+            td.textContent = "Nenhuma fatura encontrada.";
+            tbody.appendChild(tr);
+            tr.appendChild(td);
+            return;
+        }
 
-        const venc = new Date(f.data_vencimento + "T00:00:00");
-        const vencStr = venc.toLocaleDateString("pt-BR");
+        lista.forEach((f) => {
+            const tr = document.createElement("tr");
 
-        tr.innerHTML = `
-            <td>${f.id}</td>
-            <td>${f.transportadora}</td>
-            <td>${f.numero_fatura}</td>
-            <td>R$ ${f.valor.toFixed(2).replace(".", ",")}</td>
-            <td>${vencStr}</td>
-            <td>${f.status}</td>
-        `;
+            tr.innerHTML = `
+                <td>${f.id}</td>
+                <td>${f.transportadora}</td>
+                <td>${f.numero_fatura}</td>
+                <td>${formatarValor(f.valor)}</td>
+                <td>${formatarDataISOparaBR(f.data_vencimento)}</td>
+                <td>${f.status}</td>
+            `;
 
-        tabelaFaturas.appendChild(tr);
-    });
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao carregar faturas.");
+    }
 }
 
-btnFiltrar.addEventListener("click", () => carregarFaturas());
-btnLimpar.addEventListener("click", () => {
-    filtroTransportadora.value = "";
-    carregarFaturas();
-});
-
-btnExportarFiltro.addEventListener("click", () => {
-    const transportadora = filtroTransportadora.value.trim();
-    let url = "/faturas/exportar";
-    if (transportadora) {
-        const params = new URLSearchParams({ transportadora });
-        url += "?" + params.toString();
-    }
-    window.location.href = url;
-});
-
-btnExportarTodas.addEventListener("click", () => {
-    window.location.href = "/faturas/exportar";
-});
-
-// --------- Cadastro ---------
-const formCadastro = document.getElementById("formCadastro");
-const msgCadastro = document.getElementById("msgCadastro");
-
-formCadastro.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    msgCadastro.textContent = "";
-
-    const formData = new FormData(formCadastro);
-
-    const payload = {
-        transportadora: formData.get("transportadora"),
-        numero_fatura: formData.get("numero_fatura"),
-        valor: parseFloat(formData.get("valor")),
-        data_vencimento: formData.get("data_vencimento"),
-        status: formData.get("status"),
-    };
-
-    const resp = await fetch("/faturas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+document.getElementById("btn-filtrar").addEventListener("click", carregarFaturas);
+document
+    .getElementById("btn-limpar-filtro")
+    .addEventListener("click", () => {
+        document.getElementById("filtro-transportadora").value = "";
+        carregarFaturas();
     });
 
-    if (!resp.ok) {
-        msgCadastro.textContent = "Erro ao salvar fatura.";
-        msgCadastro.style.color = "red";
-        return;
-    }
+document
+    .getElementById("btn-exportar-excel")
+    .addEventListener("click", () => {
+        window.location.href = "/faturas/exportar";
+    });
 
-    msgCadastro.textContent = "Fatura salva com sucesso!";
-    msgCadastro.style.color = "green";
-    formCadastro.reset();
+// ---- Cadastro ----
 
-    // atualiza lista
-    carregarFaturas();
-    atualizarDashboard();
-});
+document
+    .getElementById("form-cadastro")
+    .addEventListener("submit", async (event) => {
+        event.preventDefault();
 
-// --------- Dashboard ---------
-const dashTotalValor = document.getElementById("dashTotalValor");
-const dashPendentes = document.getElementById("dashPendentes");
-const dashAtrasadas = document.getElementById("dashAtrasadas");
-const dashEmDia = document.getElementById("dashEmDia");
-const btnAtualizarDashboard = document.getElementById("btnAtualizarDashboard");
-const btnExportarTodasDash = document.getElementById("btnExportarTodasDash");
+        const form = event.target;
+        const dados = {
+            transportadora: form.transportadora.value.trim(),
+            numero_fatura: form.numero_fatura.value.trim(),
+            valor: parseFloat(form.valor.value),
+            data_vencimento: form.data_vencimento.value,
+            status: form.status.value,
+        };
 
-btnAtualizarDashboard.addEventListener("click", atualizarDashboard);
-btnExportarTodasDash.addEventListener("click", () => {
-    window.location.href = "/faturas/exportar";
-});
+        try {
+            const resp = await fetch("/faturas", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(dados),
+            });
 
-async function atualizarDashboard() {
-    const resp = await fetch("/faturas/resumo");
-    const dados = await resp.json();
+            if (!resp.ok) {
+                const erro = await resp.json().catch(() => ({}));
+                throw new Error(
+                    erro.detail || "Erro ao salvar fatura. Verifique os dados."
+                );
+            }
 
-    const total = dados.total_valor || 0;
-    dashTotalValor.textContent = `R$ ${total.toFixed(2).replace(".", ",")}`;
+            form.reset();
+            document.getElementById("mensagem-cadastro").textContent =
+                "Fatura cadastrada com sucesso!";
 
-    const porStatus = dados.por_status || {};
+            // Atualiza dashboard e lista
+            carregarDashboard();
+            carregarFaturas();
+        } catch (e) {
+            console.error(e);
+            alert(e.message);
+        }
+    });
 
-    function textoStatus(status) {
-        const info = porStatus[status] || { quantidade: 0, valor: 0 };
-        return `${info.quantidade} (R$ ${info.valor.toFixed(2).replace(".", ",")})`;
-    }
+// ---- Inicialização da tela ----
 
-    dashPendentes.textContent = textoStatus("pendente");
-    dashAtrasadas.textContent = textoStatus("atrasada");
-    dashEmDia.textContent = textoStatus("em dia");
-}
-
-// --------- Inicialização ---------
-carregarFaturas();
-atualizarDashboard();
+carregarDashboard();
