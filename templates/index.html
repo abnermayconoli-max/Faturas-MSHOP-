@@ -1,138 +1,178 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <title>Sistema de Contas a Pagar - Transportadoras</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <meta charset="UTF-8" />
+    <title>Contas a Pagar - Transportadoras</title>
+    <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div class="layout">
+<div class="layout">
     <!-- SIDEBAR -->
     <aside class="sidebar">
-      <h1 class="logo">Contas a Pagar</h1>
+        <h1 class="logo">Contas a Pagar</h1>
 
-      <button class="btn primary" onclick="resetFiltros()">Página inicial</button>
+        <button id="btnHome" class="sidebar-btn primary">
+            Página inicial
+        </button>
 
-      <div class="sidebar-group">
-        <h2>Gabrielly</h2>
-        <button class="btn" onclick="filtrarTransportadora('DHL')">DHL - Gabrielly</button>
-        <button class="btn" onclick="filtrarTransportadora('Pannan')">Pannan - Gabrielly</button>
-      </div>
+        <div class="sidebar-section">
+            <h2>Transportadoras</h2>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="">
+                Todas
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="DHL">
+                DHL - Gabrielly
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="Pannan">
+                Pannan - Gabrielly
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="Garcia">
+                Garcia - Juliana
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="Excargo">
+                Excargo - Juliana
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="Transbritto">
+                Transbritto - Larissa
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="PDA">
+                PDA - Larissa
+            </button>
+            <button class="sidebar-btn transportadora-btn" data-transportadora="GLM">
+                GLM - Larissa
+            </button>
+        </div>
 
-      <div class="sidebar-group">
-        <h2>Juliana</h2>
-        <button class="btn" onclick="filtrarTransportadora('Garcia')">Garcia - Juliana</button>
-        <button class="btn" onclick="filtrarTransportadora('Excargo')">Excargo - Juliana</button>
-      </div>
-
-      <div class="sidebar-group">
-        <h2>Larissa</h2>
-        <button class="btn" onclick="filtrarTransportadora('Transbritto')">Transbritto - Larissa</button>
-        <button class="btn" onclick="filtrarTransportadora('PDA')">PDA - Larissa</button>
-        <button class="btn" onclick="filtrarTransportadora('GLM')">GLM - Larissa</button>
-      </div>
-
-      <div class="sidebar-group">
-        <h2>Filtro por vencimento</h2>
-        <input type="date" id="filtro-vencimento" onchange="atualizarListaFaturas()" />
-      </div>
-
-      <a class="btn secondary" href="/faturas/exportar" target="_blank">Exportar CSV</a>
+        <div class="sidebar-section">
+            <h2>Filtro por vencimento</h2>
+            <input type="date" id="filtroVencimento" />
+            <button id="btnLimparFiltros" class="sidebar-btn">
+                Limpar filtros
+            </button>
+        </div>
     </aside>
 
     <!-- CONTEÚDO PRINCIPAL -->
-    <main class="content">
-      <!-- CARDS RESUMO -->
-      <section class="dashboard" id="dashboard-resumo">
-        <div class="card kpi">
-          <span>Total</span>
-          <strong id="kpi-total">R$ 0,00</strong>
+    <main class="main">
+        <!-- ABAS -->
+        <div class="tabs">
+            <button id="tabDashboard" class="tab active">Dashboard</button>
+            <button id="tabFaturas" class="tab">Faturas</button>
         </div>
-        <div class="card kpi">
-          <span>Pendentes</span>
-          <strong id="kpi-pendentes">R$ 0,00</strong>
-        </div>
-        <div class="card kpi">
-          <span>Atrasadas</span>
-          <strong id="kpi-atrasadas">R$ 0,00</strong>
-        </div>
-        <div class="card kpi">
-          <span>Em dia</span>
-          <strong id="kpi-em-dia">R$ 0,00</strong>
-        </div>
-      </section>
 
-      <!-- FORMULÁRIO NOVA FATURA -->
-      <section class="card form-card">
-        <h2>Cadastro de Fatura</h2>
-        <form id="form-fatura" onsubmit="criarFatura(event)">
-          <div class="form-grid">
-            <div class="form-group">
-              <label for="transportadora">Transportadora</label>
-              <select id="transportadora" name="transportadora" required>
-                <option value="">Selecione...</option>
-                <option value="DHL - Gabrielly">DHL - Gabrielly</option>
-                <option value="Pannan - Gabrielly">Pannan - Gabrielly</option>
-                <option value="Garcia - Juliana">Garcia - Juliana</option>
-                <option value="Excargo - Juliana">Excargo - Juliana</option>
-                <option value="Transbritto - Larissa">Transbritto - Larissa</option>
-                <option value="PDA - Larissa">PDA - Larissa</option>
-                <option value="GLM - Larissa">GLM - Larissa</option>
-              </select>
+        <!-- DASHBOARD -->
+        <section id="dashboardSection" class="section visible">
+            <h2>Resumo geral</h2>
+            <div class="cards">
+                <div class="card">
+                    <h3>Total</h3>
+                    <p id="cardTotal">R$ 0,00</p>
+                </div>
+                <div class="card">
+                    <h3>Pendentes</h3>
+                    <p id="cardPendentes">R$ 0,00</p>
+                </div>
+                <div class="card">
+                    <h3>Atrasadas</h3>
+                    <p id="cardAtrasadas">R$ 0,00</p>
+                </div>
+                <div class="card">
+                    <h3>Em dia</h3>
+                    <p id="cardEmDia">R$ 0,00</p>
+                </div>
             </div>
+        </section>
 
-            <div class="form-group">
-              <label for="numero_fatura">Número da Fatura</label>
-              <input type="text" id="numero_fatura" name="numero_fatura" required />
-            </div>
+        <!-- FATURAS -->
+        <section id="faturasSection" class="section">
+            <header class="filtros-header">
+                <div>
+                    <label for="buscaNumero">Buscar nº de fatura:</label>
+                    <input type="text" id="buscaNumero" placeholder="Ex: 12345" />
+                </div>
+                <button id="btnAtualizarFaturas" class="primary">
+                    Atualizar lista
+                </button>
+            </header>
 
-            <div class="form-group">
-              <label for="valor">Valor</label>
-              <input type="number" step="0.01" id="valor" name="valor" required />
-            </div>
+            <!-- FORM DE CADASTRO RÁPIDO -->
+            <section class="form-section">
+                <h2>Cadastro de Fatura</h2>
+                <form id="formFatura">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Transportadora</label>
+                            <input type="text" id="inputTransportadora" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Nº Fatura</label>
+                            <input type="text" id="inputNumeroFatura" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Valor (R$)</label>
+                            <input type="number" step="0.01" id="inputValor" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Data vencimento</label>
+                            <input type="date" id="inputVencimento" required />
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select id="inputStatus">
+                                <option value="pendente">Pendente</option>
+                                <option value="pago">Pago</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Observação</label>
+                            <input type="text" id="inputObservacao" />
+                        </div>
+                        <div class="form-group">
+                            <label>Anexos (opcional)</label>
+                            <input type="file" id="inputAnexos" multiple />
+                        </div>
+                    </div>
+                    <button type="submit" class="primary">
+                        Salvar fatura
+                    </button>
+                </form>
+            </section>
 
-            <div class="form-group">
-              <label for="data_vencimento">Data de vencimento</label>
-              <input type="date" id="data_vencimento" name="data_vencimento" required />
-            </div>
-
-            <div class="form-group">
-              <label for="status">Status</label>
-              <select id="status" name="status">
-                <option value="pendente">Pendente</option>
-                <option value="pago">Pago</option>
-              </select>
-            </div>
-
-            <div class="form-group observacao-group">
-              <label for="observacao">Observação</label>
-              <textarea id="observacao" name="observacao" rows="2"
-                placeholder="Ex: NF com divergência, aguardar retorno da transportadora..."></textarea>
-            </div>
-
-            <div class="form-group">
-              <label for="anexos">Anexos (pode selecionar vários)</label>
-              <input type="file" id="anexos" name="anexos" multiple />
-            </div>
-          </div>
-
-          <button type="submit" class="btn primary">Salvar Fatura</button>
-        </form>
-      </section>
-
-      <!-- LISTA DE FATURAS -->
-      <section class="card">
-        <div class="section-header">
-          <h2>Faturas</h2>
-          <span id="filtro-atual" class="badge"></span>
-        </div>
-        <div id="lista-faturas" class="lista-faturas">
-          <!-- preenchido via JS -->
-        </div>
-      </section>
+            <!-- TABELA DE FATURAS -->
+            <section class="table-section">
+                <h2>Faturas</h2>
+                <table class="tabela">
+                    <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Transportadora</th>
+                        <th>Responsável</th>
+                        <th>Nº Fatura</th>
+                        <th>Valor</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th>Observação</th>
+                        <th>Ações</th>
+                    </tr>
+                    </thead>
+                    <tbody id="tbodyFaturas">
+                    <!-- linhas via JS -->
+                    </tbody>
+                </table>
+            </section>
+        </section>
     </main>
-  </div>
+</div>
 
-  <script src="{{ url_for('static', path='app.js') }}"></script>
+<!-- MODAL ANEXOS -->
+<div id="modalAnexos" class="modal">
+    <div class="modal-content">
+        <button id="modalFechar" class="modal-close">&times;</button>
+        <h2>Anexos da fatura <span id="modalFaturaId"></span></h2>
+        <ul id="listaAnexos"></ul>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
 </body>
 </html>
