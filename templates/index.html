@@ -2,184 +2,57 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <title>Contas a Pagar - Transportadoras</title>
+  <title>Faturas Transportadoras</title>
   <link rel="stylesheet" href="/static/styles.css" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 </head>
 <body>
-<div class="app-container">
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-    <div class="sidebar-logo">
-      <span class="logo-dot"></span>
-      <div>
-        <div class="logo-title">Faturas MShop</div>
-        <div class="logo-subtitle">Contas a pagar</div>
+  <header class="topbar">
+    <div class="logo-area">
+      <span class="logo-badge">M</span>
+      <div class="logo-text">
+        <h1>Faturas Transportadoras</h1>
+        <span class="subtitle">Controle de contas a pagar</span>
       </div>
     </div>
+  </header>
 
-    <button class="sidebar-item sidebar-home active" data-transportadora="">
-      Página inicial
-    </button>
+  <nav class="tabs">
+    <button class="tab-button active" data-tab="faturas">Faturas</button>
+    <button class="tab-button" data-tab="dashboard">Dashboard</button>
+  </nav>
 
-    <div class="sidebar-section-title">Transportadoras</div>
-
-    <button class="sidebar-item" data-transportadora="DHL">
-      DHL - Gabrielly
-    </button>
-    <button class="sidebar-item" data-transportadora="Pannan">
-      Pannan - Gabrielly
-    </button>
-    <button class="sidebar-item" data-transportadora="Garcia">
-      Garcia - Juliana
-    </button>
-    <button class="sidebar-item" data-transportadora="Excargo">
-      Excargo - Juliana
-    </button>
-    <button class="sidebar-item" data-transportadora="Transbritto">
-      Transbritto - Larissa
-    </button>
-    <button class="sidebar-item" data-transportadora="PDA">
-      PDA - Larissa
-    </button>
-    <button class="sidebar-item" data-transportadora="GLM">
-      GLM - Larissa
-    </button>
-
-    <div class="sidebar-section-title">Filtro vencimento</div>
-    <input type="date" id="filtro-vencimento" class="sidebar-date" />
-    <button id="btn-filtrar-sidebar" class="sidebar-apply">
-      Aplicar
-    </button>
-  </aside>
-
-  <!-- MAIN -->
-  <main class="main">
-    <header class="topbar">
-      <div>
-        <h1>Contas a Pagar - Transportadoras</h1>
-        <p>Controle de faturas, anexos e dashboard financeiro.</p>
-      </div>
-      <button id="btn-exportar" class="btn-outline">Exportar CSV</button>
-    </header>
-
-    <!-- TABS -->
-    <div class="tabs">
-      <button class="tab-button active" data-tab="tab-faturas">Faturas</button>
-      <button class="tab-button" data-tab="tab-dashboard">Dashboard</button>
-    </div>
-
+  <main>
     <!-- TAB FATURAS -->
     <section id="tab-faturas" class="tab-content active">
-      <!-- FILTROS SUPERIORES -->
-      <div class="card filters-card">
-        <div class="filters-row">
-          <div class="field">
-            <label for="filtro-numero">Número da fatura</label>
-            <input
-              type="text"
-              id="filtro-numero"
-              placeholder="Pesquisar por número..."
-            />
-          </div>
-
-          <div class="field">
-            <label for="filtro-status">Status</label>
-            <select id="filtro-status">
-              <option value="">Todos</option>
-              <option value="pendente">Pendente</option>
-              <option value="pago">Pago</option>
-              <option value="aguardando">Aguardando</option>
-            </select>
-          </div>
-
-          <div class="field field-button">
-            <button id="btn-limpar-filtros" class="btn-secondary">
-              Limpar filtros
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- CADASTRO -->
-      <div class="card">
-        <div class="card-header">
-          <h2 id="form-titulo">Cadastrar fatura</h2>
-          <span id="form-subtitulo">Preencha os dados para criar uma nova fatura.</span>
+      <section class="filters">
+        <div class="filter-group">
+          <label>Transportadora</label>
+          <input type="text" id="filtro-transportadora" placeholder="Ex: DHL, Garcia..." />
         </div>
 
-        <form id="form-fatura" class="form-grid">
-          <input type="hidden" id="fatura-id-edicao" />
-
-          <div class="field">
-            <label for="transportadora">Transportadora</label>
-            <select id="transportadora" required>
-              <option value="">Selecione...</option>
-              <option value="DHL">DHL</option>
-              <option value="Pannan">Pannan</option>
-              <option value="Garcia">Garcia</option>
-              <option value="Excargo">Excargo</option>
-              <option value="Transbritto">Transbritto</option>
-              <option value="PDA">PDA</option>
-              <option value="GLM">GLM</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="numero-fatura">Número da fatura</label>
-            <input type="text" id="numero-fatura" required />
-          </div>
-
-          <div class="field">
-            <label for="valor">Valor</label>
-            <input type="number" step="0.01" id="valor" required />
-          </div>
-
-          <div class="field">
-            <label for="data-vencimento">Data de vencimento</label>
-            <input type="date" id="data-vencimento" required />
-          </div>
-
-          <div class="field">
-            <label for="status">Status</label>
-            <select id="status">
-              <option value="pendente">Pendente</option>
-              <option value="pago">Pago</option>
-              <option value="aguardando">Aguardando</option>
-            </select>
-          </div>
-
-          <div class="field field-full">
-            <label for="observacao">Observação</label>
-            <textarea id="observacao" rows="2"></textarea>
-          </div>
-
-          <div class="field field-full">
-            <label for="anexos">Anexos (opcional, múltiplos arquivos)</label>
-            <input type="file" id="anexos" multiple />
-          </div>
-
-          <div class="form-actions">
-            <button type="submit" class="btn-primary" id="btn-salvar-fatura">
-              Cadastrar
-            </button>
-            <button type="button" class="btn-secondary" id="btn-cancelar-edicao">
-              Cancelar edição
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <!-- LISTA DE FATURAS -->
-      <div class="card">
-        <div class="card-header">
-          <h2>Faturas cadastradas</h2>
-          <span id="filtro-legenda"></span>
+        <div class="filter-group">
+          <label>Até vencimento</label>
+          <input type="date" id="filtro-ate-vencimento" />
         </div>
 
-        <div class="table-wrapper">
-          <table class="table-faturas">
-            <thead>
+        <div class="filter-group">
+          <label>Nº Fatura</label>
+          <input type="text" id="filtro-numero-fatura" placeholder="Pesquisar nº..." />
+        </div>
+
+        <div class="filter-group btns">
+          <button id="btn-filtrar" class="btn primary">Filtrar</button>
+          <button id="btn-limpar" class="btn secondary">Limpar</button>
+        </div>
+      </section>
+
+      <section class="table-card">
+        <div class="table-header">
+          <h2>Faturas</h2>
+          <button id="btn-recarregar" class="btn ghost">Recarregar</button>
+        </div>
+        <table id="tabela-faturas">
+          <thead>
             <tr>
               <th>ID</th>
               <th>Transportadora</th>
@@ -188,46 +61,42 @@
               <th>Valor</th>
               <th>Vencimento</th>
               <th>Status</th>
-              <th>Observação</th>
-              <th></th>
+              <th>Obs.</th>
             </tr>
-            </thead>
-            <tbody id="tbody-faturas"></tbody>
-          </table>
-        </div>
-      </div>
+          </thead>
+          <tbody>
+            <!-- linhas via JS -->
+          </tbody>
+        </table>
+      </section>
     </section>
 
     <!-- TAB DASHBOARD -->
     <section id="tab-dashboard" class="tab-content">
-      <div class="card">
-        <div class="card-header">
-          <h2>Resumo financeiro</h2>
-          <span>Visão geral dos valores por status.</span>
-        </div>
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-label">Total</div>
-            <div class="kpi-value" id="kpi-total">R$ 0,00</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Pendentes</div>
-            <div class="kpi-value" id="kpi-pendentes">R$ 0,00</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Atrasadas</div>
-            <div class="kpi-value" id="kpi-atrasadas">R$ 0,00</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Em dia</div>
-            <div class="kpi-value" id="kpi-em-dia">R$ 0,00</div>
-          </div>
-        </div>
-      </div>
+      <section class="cards">
+        <article class="card">
+          <span class="card-label">Total em faturas</span>
+          <strong id="card-total">R$ 0,00</strong>
+        </article>
+
+        <article class="card">
+          <span class="card-label">Pendentes</span>
+          <strong id="card-pendentes">R$ 0,00</strong>
+        </article>
+
+        <article class="card">
+          <span class="card-label">Atrasadas</span>
+          <strong id="card-atrasadas">R$ 0,00</strong>
+        </article>
+
+        <article class="card">
+          <span class="card-label">Em dia</span>
+          <strong id="card-em-dia">R$ 0,00</strong>
+        </article>
+      </section>
     </section>
   </main>
-</div>
 
-<script src="/static/app.js" defer></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
