@@ -1,178 +1,126 @@
 :root {
-    --verde-principal: #00a86b;
-    --verde-escuro: #00905c;
-    --verde-claro: #f3fdf8;
-    --cinza-claro: #f0f0f0;
-    --cinza-borda: #dddddd;
-    --texto-principal: #222222;
-    --texto-suave: #666666;
-    --branco: #ffffff;
+    --verde: #27ae60; /* verde médio */
+    --verde-escuro: #1e8449;
+    --cinza-fundo: #f4f6f7;
+    --cinza-borda: #d0d3d4;
+    --texto: #333;
 }
 
 * {
     box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
-    margin: 0;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background-color: var(--verde-claro);
-    color: var(--texto-principal);
+    background: var(--cinza-fundo);
+    color: var(--texto);
 }
 
-/* Topo */
-
 .topo {
-    background: var(--verde-principal);
-    color: var(--branco);
+    background: var(--verde);
+    color: white;
     padding: 16px 24px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 .topo h1 {
-    margin: 0;
-    font-size: 1.5rem;
+    font-size: 24px;
+    font-weight: 600;
 }
 
-/* Container principal */
-
-.container {
-    max-width: 1100px;
-    margin: 24px auto 40px auto;
-    padding: 0 16px;
-}
-
-/* Abas */
-
-.tabs {
+.topo nav {
     display: flex;
     gap: 8px;
-    margin-bottom: 16px;
 }
 
-.tab-button {
+.tab-btn {
     border: none;
-    padding: 10px 16px;
-    border-radius: 8px 8px 0 0;
-    background: var(--cinza-claro);
-    color: var(--texto-principal);
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
     cursor: pointer;
-    font-weight: 500;
+    font-size: 14px;
 }
 
-.tab-button.active {
-    background: var(--branco);
-    border-bottom: 2px solid var(--branco);
-    color: var(--verde-escuro);
+.tab-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
 }
 
-/* Conteúdo das abas */
+main {
+    max-width: 1100px;
+    margin: 24px auto;
+    padding: 0 16px 32px;
+}
 
 .tab-content {
     display: none;
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
-.tab-content.active {
+.tab-content.ativo {
     display: block;
 }
 
-/* Card base */
-
-.card {
-    background: var(--branco);
-    border-radius: 12px;
-    padding: 20px 20px 24px 20px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.card h2 {
-    margin-top: 0;
+h2 {
     margin-bottom: 16px;
-    font-size: 1.25rem;
 }
 
-/* Filtros */
+/* Lista */
 
 .filtros {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 16px;
-    margin-bottom: 12px;
-}
-
-.campo {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.campo label {
-    font-size: 0.9rem;
-    color: var(--texto-suave);
-}
-
-.campo input,
-.campo select {
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--cinza-borda);
-    font-size: 0.95rem;
-}
-
-.botoes-filtro {
-    display: flex;
     gap: 8px;
+    align-items: center;
+    margin-bottom: 16px;
 }
 
-/* Botões */
+.filtros label {
+    font-size: 14px;
+}
 
-.btn {
-    border: none;
-    background: var(--verde-principal);
-    color: var(--branco);
-    padding: 8px 14px;
+.filtros input {
+    padding: 6px 8px;
     border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.95rem;
-    font-weight: 500;
-}
-
-.btn:hover {
-    background: var(--verde-escuro);
-}
-
-.btn-secundario {
-    background: #ffffff;
-    color: var(--verde-escuro);
-    border: 1px solid var(--verde-escuro);
-}
-
-.btn-secundario:hover {
-    background: #e8fff4;
-}
-
-/* Tabela */
-
-.tabela-wrapper {
-    margin-top: 12px;
-    border-radius: 8px;
-    overflow: auto;
     border: 1px solid var(--cinza-borda);
+}
+
+.filtros button {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    background: var(--verde);
+    color: white;
+}
+
+.filtros button:hover {
+    background: var(--verde-escuro);
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.9rem;
+    margin-top: 8px;
+    font-size: 14px;
 }
 
 thead {
-    background: #f7f7f7;
+    background: #ecf0f1;
 }
 
 th, td {
-    padding: 8px 10px;
+    padding: 8px 6px;
     border-bottom: 1px solid var(--cinza-borda);
     text-align: left;
 }
@@ -181,74 +129,93 @@ tbody tr:nth-child(even) {
     background: #fafafa;
 }
 
-/* Ações tabela */
+/* Cadastro */
 
-.acoes-tabela {
-    margin-top: 8px;
-    margin-bottom: 4px;
+#formCadastro {
     display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 450px;
 }
 
-/* Formulário cadastro */
-
-.form-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 16px;
+.campo label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 14px;
 }
 
-.botoes-form {
-    margin-top: 20px;
+.campo input,
+.campo select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid var(--cinza-borda);
 }
 
-/* Mensagens */
+#formCadastro button[type="submit"] {
+    width: fit-content;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: none;
+    background: var(--verde);
+    color: white;
+    cursor: pointer;
+    margin-top: 8px;
+}
+
+#formCadastro button[type="submit"]:hover {
+    background: var(--verde-escuro);
+}
 
 .mensagem {
-    margin-top: 16px;
-    font-size: 0.9rem;
-    color: var(--texto-suave);
+    margin-top: 4px;
+    font-size: 13px;
 }
 
 /* Dashboard */
 
-.cards-dashboard {
+.cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 12px;
     margin-bottom: 16px;
 }
 
-.dash-card {
-    background: var(--verde-claro);
-    border-radius: 10px;
-    padding: 12px 14px;
-    border: 1px solid #c0ecd8;
+.card {
+    padding: 16px;
+    border-radius: 12px;
+    background: #ecf9f1;
+    border: 1px solid #cdeede;
+}
+
+.card-label {
+    font-size: 13px;
+    color: #555;
+}
+
+.card-value {
+    display: block;
+    margin-top: 4px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--verde-escuro);
+}
+
+.dashboard-actions {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    gap: 8px;
 }
 
-.dash-card span {
-    font-size: 0.85rem;
-    color: var(--texto-suave);
+.dashboard-actions button {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: none;
+    background: var(--verde);
+    color: white;
+    cursor: pointer;
+    font-size: 13px;
 }
 
-.dash-card strong {
-    font-size: 1.1rem;
-}
-
-.legenda-dashboard {
-    font-size: 0.85rem;
-    color: var(--texto-suave);
-    margin-top: 12px;
-}
-
-/* Responsivo */
-
-@media (max-width: 600px) {
-    .tabs {
-        flex-wrap: wrap;
-    }
+.dashboard-actions button:hover {
+    background: var(--verde-escuro);
 }
