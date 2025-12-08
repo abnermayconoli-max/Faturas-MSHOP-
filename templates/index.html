@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Sistema de Faturas Transportadoras</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>Sistema de Faturas Transportadoras</h1>
+        <p>Painel simples de contas a pagar</p>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2>Cadastrar nova fatura</h2>
+            <form id="form-fatura">
+                <div class="grid">
+                    <label>
+                        Transportadora
+                        <input type="text" id="transportadora" required>
+                    </label>
+                    <label>
+                        Nº Fatura
+                        <input type="text" id="numero_fatura" required>
+                    </label>
+                    <label>
+                        Valor (R$)
+                        <input type="number" id="valor" step="0.01" required>
+                    </label>
+                    <label>
+                        Data vencimento
+                        <input type="date" id="data_vencimento" required>
+                    </label>
+                    <label>
+                        Status
+                        <select id="status">
+                            <option value="pendente">Pendente</option>
+                            <option value="pago">Pago</option>
+                            <option value="aguardando_baixa">Aguardando baixa</option>
+                        </select>
+                    </label>
+                </div>
+                <button type="submit">Salvar Fatura</button>
+            </form>
+            <p id="mensagem"></p>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2>Lista de faturas</h2>
+                <div class="filtros">
+                    <button data-filtro="todas" class="btn-filtro ativo">Todas</button>
+                    <button data-filtro="pendente" class="btn-filtro">Pendentes</button>
+                    <button data-filtro="pago" class="btn-filtro">Pagas</button>
+                    <button data-filtro="atrasadas" class="btn-filtro">Atrasadas</button>
+                </div>
+            </div>
+
+            <table id="tabela-faturas">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Transportadora</th>
+                        <th>Nº Fatura</th>
+                        <th>Valor</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- linhas preenchidas via JS -->
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <footer>
+        <small>Feito por Abner • FastAPI + PostgreSQL</small>
+    </footer>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
+
