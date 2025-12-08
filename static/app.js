@@ -54,30 +54,41 @@ async function carregarDashboard() {
 // ============ FATURAS ============
 
 async function carregarFaturas() {
-    try {
-        const params = new URLSearchParams();
-        if (filtroTransportadora) {
-            params.append("transportadora", filtroTransportadora);
-        }
-        if (filtroVencimento) {
-            params.append("ate_vencimento", filtroVencimento);
-        }
-        if (filtroNumeroFatura) {
-            params.append("numero_fatura", filtroNumeroFatura);
-        }
+  try {
+    const params = new URLSearchParams();
 
-        const url = `${API_BASE}/faturas?${params.toString()}`;
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error("Erro ao listar faturas");
+    if (filtroTransportadora) {
+      params.append("transportadora", filtroTransportadora);
+    }
 
-        const faturas = await resp.json();
-        const tbody = document.getElementById("tbodyFaturas");
-        tbody.innerHTML = "";
+    // Só manda a data se tiver valor (evita erro 422)
+    if (filtroVencimento && filtroVencimento.trim() !== "") {
+      params.append("ate_vencimento", filtroVencimento);
+    }
 
-        faturas.forEach((f) => {
-            const tr = document.createElement("tr");
+    // Só manda o número de fatura se tiver texto
+    if (filtroNumeroFatura && filtroNumeroFatura.trim() !== "") {
+      params.append("numero_fatura", filtroNumeroFatura.trim());
+    }
 
-            tr.innerHTML = `
+    const queryString = params.toString();
+    const url = queryString
+      ? `${API_BASE}/faturas?${queryString}`
+      : `${API_BASE}/faturas`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      throw new Error("Erro ao listar faturas");
+    }
+
+    const faturas = await resp.json();
+    const tbody = document.getElementById("tbodyFaturas");
+    tbody.innerHTML = "";
+
+    faturas.forEach((f) => {
+      const tr = document.createElement("tr");
+
+      tr.innerHTML = `
         <td>${f.id}</td>
         <td>${f.transportadora}</td>
         <td>${f.responsavel ?? ""}</td>
@@ -95,6 +106,47 @@ async function carregarFaturas() {
           </div>
         </td>
       `;
+
+      const menuBtn = tr.querySelector(".menu-btn");
+      const dropdown = tr.querySelector(".menu-dropdown");
+
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        document
+          .querySelectorAll(".menu-dropdown.ativo")
+          .forEach((m) => m.classList.remove("ativo"));
+        dropdown.classList.toggle("ativo");
+      });
+
+      dropdown.addEventListener("click", async (e) => {
+        const acao = e.target.dataset.acao;
+        if (!acao) return;
+
+        if (acao === "excluir") {
+          await excluirFatura(f.id);
+        } else if (acao === "editar") {
+          preencherFormularioEdicao(f);
+        } else if (acao === "anexos") {
+          abrirModalAnexos(f.id);
+        }
+
+        dropdown.classList.remove("ativo");
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    document.addEventListener("click", () => {
+      document
+        .querySelectorAll(".menu-dropdown.ativo")
+        .forEach((m) => m.classList.remove("ativo"));
+    });
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar faturas");
+  }
+}
+
 
             // listeners do menu
             const menuBtn = tr.querySelector(".menu-btn");
