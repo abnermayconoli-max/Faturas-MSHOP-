@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sistema de Faturas - MSHOP</title>
+  <style>
+    * { box-sizing: border-box; font-family: Arial, sans-serif; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0b0b10;
+      color: #f1f1f1;
+    }
+    header {
+      background: #4b0082;
+      padding: 16px 24px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    main {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 16px 40px;
+    }
+    h2 {
+      margin-top: 32px;
+      font-size: 18px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 4px;
+    }
+    .card {
+      background: #15151f;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 12px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.5);
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    input, select {
+      width: 100%;
+      padding: 6px 8px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      border: 1px solid #333;
+      background: #0f0f18;
+      color: #f1f1f1;
+    }
+    button {
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      margin-right: 4px;
+      margin-top: 4px;
+    }
+    button.primary {
+      background: #4b0082;
+      color: #fff;
+    }
+    button.danger {
+      background: #b00020;
+      color: #fff;
+    }
+    button.secondary {
+      background: #333;
+      color: #fff;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid #333;
+      padding: 6px 8px;
+      text-align: left;
+    }
+    th {
+      background: #181824;
+    }
+    tr:nth-child(even) td {
+      background: #10101a;
+    }
+    .status-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+    }
+    .status-pendente {
+      background: #8a6d3b;
+      color: #fff;
+    }
+    .status-pago {
+      background: #2e7d32;
+      color: #fff;
+    }
+    .status-atrasado {
+      background: #b00020;
+      color: #fff;
+    }
+    .linha-atrasada {
+      background: #311018 !important;
+    }
+    .erro {
+      color: #ff6b6b;
+      margin-top: 6px;
+      font-size: 13px;
+    }
+    .sucesso {
+      color: #2ecc71;
+      margin-top: 6px;
+      font-size: 13px;
+    }
+    .linha-top {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .linha-top span {
+      font-size: 13px;
+      color: #ccc;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Sistema de Faturas Transportadoras - MSHOP</h1>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="linha-top">
+        <h2>Cadastrar / Editar Fatura</h2>
+        <span id="msg-geral"></span>
+      </div>
+
+      <form id="form-fatura">
+        <input type="hidden" id="fatura-id" />
+
+        <label for="transportadora">Transportadora</label>
+        <input type="text" id="transportadora" required />
+
+        <label for="numero_fatura">Número da Fatura</label>
+        <input type="text" id="numero_fatura" required />
+
+        <label for="valor">Valor (R$)</label>
+        <input type="number" step="0.01" id="valor" required />
+
+        <label for="data_vencimento">Data de Vencimento</label>
+        <input type="date" id="data_vencimento" required />
+
+        <label for="status">Status</label>
+        <select id="status">
+          <option value="pendente">Pendente</option>
+          <option value="pago">Pago</option>
+          <option value="atrasado">Atrasado</option>
+        </select>
+
+        <button type="submit" class="primary" id="btn-salvar">Salvar Fatura</button>
+        <button type="button" class="secondary" id="btn-limpar">Limpar</button>
+        <p id="msg-form" class=""></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="linha-top">
+        <h2>Faturas Cadastradas</h2>
+        <button type="button" class="secondary" id="btn-recarregar">Recarregar Lista</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Transportadora</th>
+            <th>Nº Fatura</th>
+            <th>Valor</th>
+            <th>Vencimento</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="tabela-faturas">
+          <!-- linhas preenchidas via JS -->
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = ""; // mesmo host da API
+
+    const form = document.getElementById("form-fatura");
+    const inputId = document.getElementById("fatura-id");
+    const inputTransportadora = document.getElementById("transportadora");
+    const inputNumeroFatura = document.getElementById("numero_fatura");
+    const inputValor = document.getElementById("valor");
+    const inputDataVencimento = document.getElementById("data_vencimento");
+    const inputStatus = document.getElementById("status");
+
+    const msgForm = document.getElementById("msg-form");
+    const msgGeral = document.getElementById("msg-geral");
+    const tabelaFaturas = document.getElementById("tabela-faturas");
+
+    const btnLimpar = document.getElementById("btn-limpar");
+    const btnRecarregar = document.getElementById("btn-recarregar");
+    const btnSalvar = document.getElementById("btn-salvar");
+
+    function setMensagemForm(texto, tipo) {
+      msgForm.textContent = texto || "";
+      msgForm.className = tipo === "erro" ? "erro" : tipo === "sucesso" ? "sucesso" : "";
+    }
+
+    function setMensagemGeral(texto) {
+      msgGeral.textContent = texto || "";
+    }
+
+    function limparFormulario() {
+      inputId.value = "";
+      inputTransportadora.value = "";
+      inputNumeroFatura.value = "";
+      inputValor.value = "";
+      inputDataVencimento.value = "";
+      inputStatus.value = "pendente";
+      setMensagemForm("", "");
+      btnSalvar.textContent = "Salvar Fatura";
+    }
+
+    async function carregarFaturas() {
+      setMensagemGeral("Carregando faturas...");
+      tabelaFaturas.innerHTML = "";
+
+      try {
+        const resp = await fetch(`${API_BASE}/faturas`);
+        if (!resp.ok) {
+          throw new Error("Erro ao buscar faturas");
+        }
+        const dados = await resp.json();
+        preencherTabela(dados);
+        setMensagemGeral(`Total de faturas: ${dados.length}`);
+      } catch (erro) {
+        console.error(erro);
+        setMensagemGeral("Erro ao carregar faturas.");
+      }
+    }
+
+    function preencherTabela(lista) {
+      tabelaFaturas.innerHTML = "";
+
+      const hoje = new Date();
+      lista.forEach((fatura) => {
+        const tr = document.createElement("tr");
+
+        const venc = new Date(fatura.data_vencimento);
+        const vencAtrasado = venc < hoje && fatura.status !== "pago";
+
+        if (vencAtrasado) {
+          tr.classList.add("linha-atrasada");
+        }
+
+        tr.innerHTML = `
+          <td>${fatura.id}</td>
+          <td>${fatura.transportadora}</td>
+          <td>${fatura.numero_fatura}</td>
+          <td>R$ ${Number(fatura.valor).toFixed(2)}</td>
+          <td>${formatarData(fatura.data_vencimento)}</td>
+          <td>${renderStatus(fatura.status)}</td>
+          <td>
+            <button class="secondary btn-editar" data-id="${fatura.id}">Editar</button>
+            <button class="danger btn-excluir" data-id="${fatura.id}">Excluir</button>
+            <button class="primary btn-marcar-pago" data-id="${fatura.id}">Marcar Pago</button>
+          </td>
+        `;
+
+        tabelaFaturas.appendChild(tr);
+      });
+
+      document.querySelectorAll(".btn-editar").forEach((btn) => {
+        btn.addEventListener("click", () => carregarFaturaParaEdicao(btn.dataset.id));
+      });
+      document.querySelectorAll(".btn-excluir").forEach((btn) => {
+        btn.addEventListener("click", () => excluirFatura(btn.dataset.id));
+      });
+      document.querySelectorAll(".btn-marcar-pago").forEach((btn) => {
+        btn.addEventListener("click", () => marcarComoPago(btn.dataset.id));
+      });
+    }
+
+    function renderStatus(status) {
+      let classe = "status-pendente";
+      if (status === "pago") classe = "status-pago";
+      if (status === "atrasado") classe = "status-atrasado";
+      return `<span class="status-pill ${classe}">${status}</span>`;
+    }
+
+    function formatarData(dataIso) {
+      if (!dataIso) return "";
+      const d = new Date(dataIso);
+      const dia = String(d.getDate()).padStart(2, "0");
+      const mes = String(d.getMonth() + 1).padStart(2, "0");
+      const ano = d.getFullYear();
+      return `${dia}/${mes}/${ano}`;
+    }
+
+    async function salvarFatura(event) {
+      event.preventDefault();
+      setMensagemForm("", "");
+
+      const corpo = {
+        transportadora: inputTransportadora.value.trim(),
+        numero_fatura: inputNumeroFatura.value.trim(),
+        valor: Number(inputValor.value),
+        data_vencimento: inputDataVencimento.value,
+        status: inputStatus.value,
+      };
+
+      if (!corpo.transportadora || !corpo.numero_fatura || !corpo.valor || !corpo.data_vencimento) {
+        setMensagemForm("Preencha todos os campos obrigatórios.", "erro");
+        return;
+      }
+
+      const id = inputId.value;
+      const metodo = id ? "PUT" : "POST";
+      const url = id ? `${API_BASE}/faturas/${id}` : `${API_BASE}/faturas`;
+
+      btnSalvar.disabled = true;
+
+      try {
+        const resp = await fetch(url, {
+          method: metodo,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(corpo),
+        });
+
+        if (!resp.ok) {
+          const erro = await resp.json().catch(() => ({}));
+          console.error(erro);
+          throw new Error("Erro ao salvar fatura");
+        }
+
+        await resp.json();
+        setMensagemForm("Fatura salva com sucesso!", "sucesso");
+        limparFormulario();
+        carregarFaturas();
+      } catch (erro) {
+        console.error(erro);
+        setMensagemForm("Erro ao salvar fatura.", "erro");
+      } finally {
+        btnSalvar.disabled = false;
+      }
+    }
+
+    async function carregarFaturaParaEdicao(id) {
+      try {
+        const resp = await fetch(`${API_BASE}/faturas/${id}`);
+        if (!resp.ok) throw new Error("Erro ao buscar fatura");
+        const f = await resp.json();
+
+        inputId.value = f.id;
+        inputTransportadora.value = f.transportadora;
+        inputNumeroFatura.value = f.numero_fatura;
+        inputValor.value = f.valor;
+        inputDataVencimento.value = f.data_vencimento;
+        inputStatus.value = f.status;
+
+        btnSalvar.textContent = "Atualizar Fatura";
+        setMensagemForm("Fatura carregada para edição.", "sucesso");
+      } catch (erro) {
+        console.error(erro);
+        setMensagemForm("Erro ao carregar fatura para edição.", "erro");
+      }
+    }
+
+    async function excluirFatura(id) {
+      if (!confirm("Tem certeza que deseja excluir esta fatura?")) return;
+
+      try {
+        const resp = await fetch(`${API_BASE}/faturas/${id}`, {
+          method: "DELETE",
+        });
+        if (!resp.ok) throw new Error("Erro ao excluir fatura");
+        carregarFaturas();
+        setMensagemGeral("Fatura excluída com sucesso.");
+      } catch (erro) {
+        console.error(erro);
+        setMensagemGeral("Erro ao excluir fatura.");
+      }
+    }
+
+    async function marcarComoPago(id) {
+      try {
+        const resp = await fetch(`${API_BASE}/faturas/${id}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "pago" }),
+        });
+        if (!resp.ok) throw new Error("Erro ao atualizar status");
+        carregarFaturas();
+        setMensagemGeral("Fatura marcada como paga.");
+      } catch (erro) {
+        console.error(erro);
+        setMensagemGeral("Erro ao marcar fatura como paga.");
+      }
+    }
+
+    form.addEventListener("submit", salvarFatura);
+    btnLimpar.addEventListener("click", limparFormulario);
+    btnRecarregar.addEventListener("click", carregarFaturas);
+
+    window.addEventListener("load", carregarFaturas);
+  </script>
+</body>
+</html>
