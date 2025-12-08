@@ -1,278 +1,284 @@
-/* =========================
-   Reset básico
-========================= */
-* {
+/* Reset simples */
+*,
+*::before,
+*::after {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #f3f6fb;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f3f6f9;
     color: #1f2933;
 }
 
-/* =========================
-   Topbar
-========================= */
+/* Topbar */
+
 .topbar {
-    position: sticky;
-    top: 0;
-    z-index: 100;
+    background: #19a85b; /* verde médio */
+    color: #fff;
+    padding: 10px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+.topbar-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 32px;
-    background: #22a852; /* verde intermediário */
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.brand {
-    font-size: 1.3rem;
-    font-weight: 600;
+.logo {
+    font-size: 22px;
+    font-weight: 700;
 }
 
-.topbar-nav {
+.menu {
     display: flex;
     gap: 8px;
 }
 
-.nav-btn {
+.menu-item {
     border: none;
     background: transparent;
-    color: #e8fff0;
-    font-weight: 500;
-    padding: 8px 12px;
+    color: #e8f9ef;
+    padding: 8px 14px;
     border-radius: 999px;
+    font-size: 14px;
     cursor: pointer;
-    transition: background 0.2s, color 0.2s;
+    transition: background 0.15s, color 0.15s;
 }
 
-.nav-btn:hover {
-    background: rgba(255, 255, 255, 0.16);
+.menu-item:hover {
+    background: rgba(255,255,255,0.16);
 }
 
-/* =========================
-   Layout principal
-========================= */
+.menu-item.active {
+    background: #ffffff;
+    color: #158047;
+}
+
+/* Container principal */
+
 .container {
     max-width: 1200px;
-    margin: 24px auto 48px;
-    padding: 0 16px;
+    margin: 24px auto;
+    padding: 0 16px 40px;
 }
+
+/* Abas */
+
+.tab {
+    display: none;
+}
+
+.tab.active {
+    display: block;
+}
+
+h1 {
+    font-size: 26px;
+    margin-bottom: 16px;
+}
+
+/* Card */
 
 .card {
     background: #ffffff;
-    border-radius: 18px;
-    padding: 24px 28px 28px;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-    margin-bottom: 24px;
+    border-radius: 16px;
+    padding: 20px 22px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
 
-.card-header {
-    margin-bottom: 20px;
-}
+/* Campos / formulários */
 
-.card-header h2 {
-    font-size: 1.4rem;
-    font-weight: 600;
-    color: #111827;
-}
-
-/* =========================
-   Campos / formulários
-========================= */
 .form-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 24px;
 }
 
-.field-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.field-group.full {
+.form-grid .full {
     grid-column: 1 / -1;
 }
 
-label {
-    font-size: 0.9rem;
-    color: #4b5563;
+.campo {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
 }
 
-input[type="text"],
-input[type="number"],
-input[type="date"],
-select,
-textarea {
-    padding: 9px 10px;
+.campo label {
+    font-weight: 600;
+}
+
+.campo input,
+.campo select,
+.campo textarea {
     border-radius: 10px;
-    border: 1px solid #d1d5db;
-    font-size: 0.95rem;
+    border: 1px solid #d0d7e2;
+    padding: 8px 10px;
+    font-size: 14px;
     outline: none;
     transition: border-color 0.15s, box-shadow 0.15s;
     background: #f9fafb;
 }
 
-input:focus,
-select:focus,
-textarea:focus {
-    border-color: #22a852;
-    box-shadow: 0 0 0 1px rgba(34, 168, 82, 0.3);
+.campo input:focus,
+.campo select:focus,
+.campo textarea:focus {
+    border-color: #19a85b;
+    box-shadow: 0 0 0 1px rgba(25,168,91,0.25);
     background: #ffffff;
 }
 
-textarea {
-    resize: vertical;
-}
-
-.help-text {
-    font-size: 0.8rem;
+.campo small {
+    font-size: 12px;
     color: #6b7280;
 }
 
-/* =========================
-   Botões
-========================= */
+/* Botões */
+
 .btn {
     border-radius: 999px;
-    padding: 9px 18px;
     border: none;
-    font-size: 0.9rem;
-    font-weight: 500;
+    padding: 8px 16px;
+    font-size: 14px;
     cursor: pointer;
-    transition: background 0.15s, transform 0.05s, box-shadow 0.15s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
+    background: #e5e7eb;
+    color: #111827;
+    transition: background 0.15s, transform 0.05s, box-shadow 0.05s;
+}
+
+.btn:hover {
+    background: #d1d5db;
+}
+
+.btn:active {
+    transform: translateY(1px);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .btn.primary {
-    background: #22a852;
-    color: #ffffff;
-    box-shadow: 0 4px 10px rgba(34, 168, 82, 0.35);
+    background: #19a85b;
+    color: #fff;
 }
 
 .btn.primary:hover {
-    background: #1c8b44;
+    background: #158047;
 }
 
-.btn.secondary {
-    background: #e5f7ec;
-    color: #166534;
+.btn.outline {
+    background: transparent;
+    border: 1px solid #19a85b;
+    color: #158047;
 }
 
-.btn.secondary:hover {
-    background: #d1f0dd;
+.btn.outline:hover {
+    background: rgba(25,168,91,0.06);
 }
 
-.btn-row {
+.botoes-filtro {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-}
-
-/* =========================
-   Filtros / tabela
-========================= */
-.filters {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px 24px;
-    margin-bottom: 18px;
-}
-
-.table-wrapper {
+    align-items: flex-end;
     margin-top: 8px;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 1px solid #e5e7eb;
 }
 
-table {
+.acoes-form {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 4px;
+}
+
+/* Tabela */
+
+.tabela {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.9rem;
+    margin-top: 18px;
+    font-size: 14px;
 }
 
-thead {
-    background: #f0fdf4;
-}
-
-th,
-td {
-    padding: 10px 12px;
-    text-align: left;
+.tabela th,
+.tabela td {
+    padding: 8px 10px;
     border-bottom: 1px solid #e5e7eb;
+    text-align: left;
 }
 
-th {
+.tabela th {
     font-weight: 600;
-    color: #374151;
+    background: #f3f4f6;
 }
 
-tr:nth-child(even) td {
-    background-color: #f9fafb;
-}
+/* Dashboard cards */
 
-/* Ações (3 pontinhos, etc) - visual básico */
-.actions-cell {
-    text-align: right;
-}
-
-/* =========================
-   Dashboard
-========================= */
-.dashboard-grid {
+.cards-dashboard {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0,1fr));
     gap: 16px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
 }
 
 .dash-card {
     background: #f0fdf4;
     border-radius: 16px;
-    padding: 16px 18px;
+    padding: 14px;
     border: 1px solid #bbf7d0;
 }
 
 .dash-label {
-    font-size: 0.85rem;
-    color: #4b5563;
-    margin-bottom: 8px;
+    font-size: 13px;
+    color: #166534;
 }
 
 .dash-value {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #065f46;
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    margin-top: 6px;
+    color: #064e3b;
 }
 
-/* =========================
-   Utilitários
-========================= */
-.hidden {
-    display: none;
+.acoes-dashboard {
+    display: flex;
+    gap: 8px;
 }
 
-/* =========================
-   Responsivo
-========================= */
+/* Filtros */
+
+.filtros {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+/* Responsivo */
+
 @media (max-width: 900px) {
-    .form-grid,
-    .filters,
-    .dashboard-grid {
+    .form-grid {
         grid-template-columns: 1fr;
     }
 
-    .topbar {
+    .cards-dashboard {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .cards-dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .topbar-inner {
         flex-direction: column;
         align-items: flex-start;
         gap: 8px;
