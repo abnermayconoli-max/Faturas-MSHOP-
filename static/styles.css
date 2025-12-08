@@ -1,221 +1,170 @@
 :root {
-    --verde: #27ae60; /* verde médio */
-    --verde-escuro: #1e8449;
-    --cinza-fundo: #f4f6f7;
-    --cinza-borda: #d0d3d4;
-    --texto: #333;
+    --green-main: #21a366;
+    --green-dark: #1a7c4d;
+    --green-light: #f3fbf6;
+    --bg-page: #f5f7fb;
+    --card-border: #e0e7f1;
+    --text-main: #1f2933;
+    --text-muted: #6b7280;
+    --white: #ffffff;
+    --radius: 8px;
+    --shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+    --transition: 0.2s ease-in-out;
+    --font-main: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
 }
 
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 body {
-    background: var(--cinza-fundo);
-    color: var(--texto);
+    font-family: var(--font-main);
+    background: var(--bg-page);
+    color: var(--text-main);
 }
 
-.topo {
-    background: var(--verde);
-    color: white;
-    padding: 16px 24px;
+/* Topo */
+
+.top-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    background: var(--green-main);
+    padding: 14px 32px;
+    color: var(--white);
+    box-shadow: var(--shadow);
 }
 
-.topo h1 {
-    font-size: 24px;
-    font-weight: 600;
+.brand {
+    font-size: 22px;
+    font-weight: 700;
 }
 
-.topo nav {
+.menu {
     display: flex;
     gap: 8px;
 }
 
-.tab-btn {
+.menu-btn {
     border: none;
-    padding: 8px 16px;
+    background: transparent;
+    color: var(--white);
+    padding: 8px 18px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.15);
-    color: white;
     cursor: pointer;
     font-size: 14px;
+    transition: var(--transition);
 }
 
-.tab-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
+.menu-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
 }
 
-main {
-    max-width: 1100px;
-    margin: 24px auto;
-    padding: 0 16px 32px;
+.menu-btn.active {
+    background: var(--white);
+    color: var(--green-main);
 }
 
-.tab-content {
+/* Conteúdo */
+
+.content {
+    padding: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page {
     display: none;
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
-.tab-content.ativo {
+.page.visible {
     display: block;
-}
-
-h2 {
-    margin-bottom: 16px;
-}
-
-/* Lista */
-
-.filtros {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 16px;
-}
-
-.filtros label {
-    font-size: 14px;
-}
-
-.filtros input {
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--cinza-borda);
-}
-
-.filtros button {
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: none;
-    cursor: pointer;
-    font-size: 13px;
-    background: var(--verde);
-    color: white;
-}
-
-.filtros button:hover {
-    background: var(--verde-escuro);
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 8px;
-    font-size: 14px;
-}
-
-thead {
-    background: #ecf0f1;
-}
-
-th, td {
-    padding: 8px 6px;
-    border-bottom: 1px solid var(--cinza-borda);
-    text-align: left;
-}
-
-tbody tr:nth-child(even) {
-    background: #fafafa;
-}
-
-/* Cadastro */
-
-#formCadastro {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-width: 450px;
-}
-
-.campo label {
-    display: block;
-    margin-bottom: 4px;
-    font-size: 14px;
-}
-
-.campo input,
-.campo select {
-    width: 100%;
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px solid var(--cinza-borda);
-}
-
-#formCadastro button[type="submit"] {
-    width: fit-content;
-    padding: 8px 16px;
-    border-radius: 999px;
-    border: none;
-    background: var(--verde);
-    color: white;
-    cursor: pointer;
-    margin-top: 8px;
-}
-
-#formCadastro button[type="submit"]:hover {
-    background: var(--verde-escuro);
-}
-
-.mensagem {
-    margin-top: 4px;
-    font-size: 13px;
-}
-
-/* Dashboard */
-
-.cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
 }
 
 .card {
-    padding: 16px;
-    border-radius: 12px;
-    background: #ecf9f1;
-    border: 1px solid #cdeede;
+    background: var(--white);
+    border-radius: 16px;
+    padding: 24px 28px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--card-border);
 }
 
-.card-label {
-    font-size: 13px;
-    color: #555;
+.card.large {
+    min-height: 260px;
 }
 
-.card-value {
-    display: block;
-    margin-top: 4px;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--verde-escuro);
+.card.small {
+    max-width: 700px;
 }
 
-.dashboard-actions {
-    display: flex;
-    gap: 8px;
+.card h2 {
+    margin-bottom: 20px;
 }
 
-.dashboard-actions button {
-    padding: 8px 12px;
+/* Dashboard cards */
+
+.cards-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.info-card {
+    background: var(--green-light);
+    border-radius: 14px;
+    padding: 16px 18px;
+    border: 1px solid #d4eee0;
+}
+
+.info-card h3 {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.info-card .big {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+/* Botões */
+
+.btn {
     border-radius: 999px;
-    border: none;
-    background: var(--verde);
-    color: white;
+    border: 1px solid var(--green-main);
+    padding: 10px 18px;
+    font-size: 14px;
     cursor: pointer;
-    font-size: 13px;
+    background: var(--white);
+    color: var(--green-main);
+    transition: var(--transition);
 }
 
-.dashboard-actions button:hover {
-    background: var(--verde-escuro);
+.btn:hover {
+    background: #e8f6ef;
 }
+
+.btn.primary {
+    background: var(--green-main);
+    color: var(--white);
+}
+
+.btn.primary:hover {
+    background: var(--green-dark);
+}
+
+.btn.ghost {
+    border-color: #d1d5db;
+    color: var(--text-muted);
+}
+
+/* Linhas de ações e filtros */
+
+.actions-row,
+.filters-row {
+    display: flex;
