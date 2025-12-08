@@ -1,72 +1,54 @@
-function formatValor(valor) {
-  const n = Number(valor || 0);
-  return n.toLocaleString("pt-BR", {
+function formatCurrency(value) {
+  const num = Number(value || 0);
+  return num.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
+    minimumFractionDigits: 2,
   });
 }
 
-function formatDataiso(iso) {
+function formatDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString("pt-BR");
 }
 
-/* ---------- Tabs ----------- */
-
-document.querySelectorAll(".tab-button").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document
-      .querySelectorAll(".tab-button")
-      .forEach((b) => b.classList.remove("active"));
-    document
-      .querySelectorAll(".tab-content")
-      .forEach((c) => c.classList.remove("active"));
-
-    btn.classList.add("active");
-    const tabId = "tab-" + btn.dataset.tab;
-    document.getElementById(tabId).classList.add("active");
-  });
-});
-
-/* ---------- Faturas ----------- */
-
 async function carregarFaturas() {
   try {
-    const transportadora = document.getElementById("filtro-transportadora").value.trim();
-    const ateVenc = document.getElementById("filtro-ate-vencimento").value;
-    const numeroFatura = document.getElementById("filtro-numero-fatura").value.trim();
-
     const params = new URLSearchParams();
-    if (transportadora) params.append("transportadora", transportadora);
-    if (ateVenc) params.append("ate_vencimento", ateVenc);
-    if (numeroFatura) params.append("numero_fatura", numeroFatura);
 
-    const url = "/faturas" + (params.toString() ? `?${params.toString()}` : "");
+    const t = document.getElementById("filtro-transportadora").value.trim();
+    const nf = document.getElementById("filtro-numero").value.trim();
+    const venc = document.getElementById("filtro-vencimento").value;
+
+    if (t) params.append("transportadora", t);
+    if (nf) params.append("numero_fatura", nf);
+    if (venc) params.append("ate_vencimento", venc);
+
+    const url = "/faturas" + (params.toString() ? "?" + params.toString() : "");
     const resp = await fetch(url);
 
     if (!resp.ok) {
-      alert("Erro ao carregar faturas");
-      return;
+      throw new Error("Erro HTTP " + resp.status);
     }
 
     const dados = await resp.json();
     const tbody = document.querySelector("#tabela-faturas tbody");
     tbody.innerHTML = "";
 
-    if (!Array.isArray(dados) || dados.length === 0) {
+    if (!dados.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 8;
-      td.textContent = "Nenhuma fatura encontrada";
+      td.colSpan = 7;
+      td.textContent = "Nenhuma fatura encontrada.";
       td.style.textAlign = "center";
       tr.appendChild(td);
       tbody.appendChild(tr);
       return;
     }
 
-    dados.forEach((f) => {
+    for (const f of dados) {
       const tr = document.createElement("tr");
 
       tr.innerHTML = `
@@ -74,58 +56,74 @@ async function carregarFaturas() {
         <td>${f.transportadora}</td>
         <td>${f.responsavel || ""}</td>
         <td>${f.numero_fatura}</td>
-        <td>${formatValor(f.valor)}</td>
-        <td>${formatDataiso(f.data_vencimento)}</td>
+        <td>${formatCurrency(f.valor)}</td>
+        <td>${formatDate(f.data_vencimento)}</td>
         <td>${f.status}</td>
-        <td>${f.observacao || ""}</td>
       `;
 
       tbody.appendChild(tr);
-    });
-  } catch (e) {
-    console.error(e);
+    }
+  } catch (err) {
+    console.error(err);
     alert("Erro ao carregar faturas");
   }
 }
-
-/* ---------- Dashboard ----------- */
 
 async function carregarDashboard() {
   try {
     const resp = await fetch("/dashboard/resumo");
     if (!resp.ok) return;
 
-    const d = await resp.json();
-    document.getElementById("card-total").textContent = formatValor(d.total);
-    document.getElementById("card-pendentes").textContent = formatValor(d.pendentes);
-    document.getElementById("card-atrasadas").textContent = formatValor(d.atrasadas);
-    document.getElementById("card-em-dia").textContent = formatValor(d.em_dia);
-  } catch (e) {
-    console.error(e);
+    const k = await resp.json();
+    document.getElementById("kpi-total").textContent = formatCurrency(k.total);
+    document.getElementById("kpi-pendentes").textContent = formatCurrency(k.pendentes);
+    document.getElementById("kpi-atrasadas").textContent = formatCurrency(k.atrasadas);
+    document.getElementById("kpi-em-dia").textContent = formatCurrency(k.em_dia);
+  } catch (err) {
+    console.error(err);
   }
 }
 
-/* ---------- Listeners ----------- */
+function initTabs() {
+  const buttons = document.querySelectorAll(".tab-button");
+  const contents = document.querySelectorAll(".tab-content");
 
-document.getElementById("btn-filtrar").addEventListener("click", (e) => {
-  e.preventDefault();
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      buttons.forEach((b) => b.classList.remove("active"));
+      contents.forEach((c) => c.classList.remove("active"));
+
+      btn.classList.add("active");
+      const id = "tab-" + btn.dataset.tab;
+      document.getElementById(id).classList.add("active");
+
+      if (btn.dataset.tab === "dashboard") {
+        carregarDashboard();
+      }
+    });
+  });
+}
+
+function initFiltros() {
+  document.getElementById("btn-filtrar").addEventListener("click", () => {
+    carregarFaturas();
+  });
+
+  document.getElementById("btn-atualizar").addEventListener("click", () => {
+    carregarFaturas();
+  });
+
+  document.getElementById("btn-limpar").addEventListener("click", () => {
+    document.getElementById("filtro-transportadora").value = "";
+    document.getElementById("filtro-numero").value = "";
+    document.getElementById("filtro-vencimento").value = "";
+    carregarFaturas();
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initTabs();
+  initFiltros();
   carregarFaturas();
+  carregarDashboard();
 });
-
-document.getElementById("btn-limpar").addEventListener("click", (e) => {
-  e.preventDefault();
-  document.getElementById("filtro-transportadora").value = "";
-  document.getElementById("filtro-ate-vencimento").value = "";
-  document.getElementById("filtro-numero-fatura").value = "";
-  carregarFaturas();
-});
-
-document.getElementById("btn-recarregar").addEventListener("click", (e) => {
-  e.preventDefault();
-  carregarFaturas();
-});
-
-/* ---------- Inicialização ----------- */
-
-carregarFaturas();
-carregarDashboard();
