@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 import os
 import uuid
 from typing import List, Optional
@@ -10,11 +10,11 @@ from fastapi import (
     UploadFile,
     File,
     Query,
+    Request,
 )
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -28,6 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
+
 # =========================
 # CONFIG BANCO DE DADOS
 # =========================
@@ -35,15 +36,17 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
+    # Render: garanta que a env está configurada
     raise RuntimeError("DATABASE_URL não configurada nas variáveis de ambiente do Render.")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Pasta para anexos
+# Pasta para anexos (disco efêmero do Render, mas funciona enquanto o serviço roda)
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
+
 
 # =========================
 # MODELO SQLALCHEMY
@@ -76,7 +79,7 @@ class AnexoDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
     filename = Column(String)       # nome salvo no disco
-    original_name = Column(String)  # nome do arquivo que o usuário enviou
+    original_name = Column(String)  # nome original do arquivo
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
@@ -177,7 +180,7 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -231,7 +234,7 @@ def listar_faturas(
     if ate_vencimento:
         query = query.filter(FaturaDB.data_vencimento <= ate_vencimento)
 
-    query = query.order_by(FaturaDB.id)
+    query = query.order_by(FaturaDB.data_vencimento, FaturaDB.transportadora, FaturaDB.id)
     return query.all()
 
 
@@ -298,7 +301,7 @@ async def upload_anexos(
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    anexos_criados = []
+    anexos_criados: List[AnexoDB] = []
 
     for file in files:
         unique_name = f"{uuid.uuid4().hex}_{file.filename}"
@@ -317,7 +320,6 @@ async def upload_anexos(
         anexos_criados.append(anexo_db)
 
     db.commit()
-
     return anexos_criados
 
 
