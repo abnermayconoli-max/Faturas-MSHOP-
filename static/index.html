@@ -1,144 +1,402 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <title>Faturas MSHOP</title>
-    <link rel="stylesheet" href="/static/style.css">
+  <meta charset="UTF-8" />
+  <title>Faturas MSHOP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --ms-green: #23a455;        /* verde médio */
+      --ms-green-soft: #e7f7ee;   /* verde bem clarinho para cards */
+    }
+
+    body {
+      background-color: #f5f7fb;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .navbar-ms {
+      background-color: var(--ms-green);
+    }
+
+    .navbar-ms .nav-link,
+    .navbar-ms .navbar-brand {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .navbar-ms .nav-link.active {
+      text-decoration: underline;
+    }
+
+    .page {
+      display: none;
+      margin-top: 1.5rem;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .card-dashboard {
+      background-color: var(--ms-green-soft);
+      border: 1px solid #d2ebdd;
+      border-radius: 1rem;
+      padding: 1.5rem;
+      height: 100%;
+    }
+
+    .card-dashboard h6 {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: #4c7c5e;
+    }
+
+    .card-dashboard .valor {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: .25rem;
+    }
+
+    .card-dashboard .detalhe {
+      font-size: 0.9rem;
+      color: #4c7c5e;
+    }
+
+    .btn-ms {
+      background-color: var(--ms-green);
+      color: #fff;
+      border: none;
+      border-radius: 999px;
+      padding-inline: 1.5rem;
+      font-weight: 600;
+    }
+
+    .btn-ms:hover {
+      filter: brightness(0.95);
+      color: #fff;
+    }
+
+    .table thead {
+      background-color: var(--ms-green-soft);
+    }
+  </style>
 </head>
 <body>
-    <header class="top-bar">
-        <div class="brand">Faturas MSHOP</div>
-        <nav class="menu">
-            <button class="menu-btn" data-page="faturas">Faturas</button>
-            <button class="menu-btn" data-page="cadastro">Cadastro</button>
-            <button class="menu-btn active" data-page="dashboard">Dashboard</button>
-        </nav>
-    </header>
+  <nav class="navbar navbar-expand-lg navbar-ms">
+    <div class="container-fluid px-4">
+      <a class="navbar-brand" href="#">Faturas MSHOP</a>
+      <div class="ms-auto navbar-nav">
+        <a class="nav-link active" href="#" data-page="page-faturas">Faturas</a>
+        <a class="nav-link" href="#" data-page="page-cadastro">Cadastro</a>
+        <a class="nav-link" href="#" data-page="page-dashboard">Dashboard</a>
+      </div>
+    </div>
+  </nav>
 
-    <main class="content">
-        <!-- DASHBOARD -->
-        <section id="page-dashboard" class="page visible">
-            <div class="card large">
-                <h2>Dashboard</h2>
+  <main class="container-fluid px-4 py-3">
+    <!-- Página Faturas -->
+    <section id="page-faturas" class="page active">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <h4 class="mb-3">Lista de Faturas</h4>
 
-                <div class="cards-row">
-                    <div class="info-card">
-                        <h3>Valor total</h3>
-                        <p class="big" id="total-valor">R$ 0,00</p>
-                        <span id="total-qtd">0 faturas</span>
-                    </div>
-
-                    <div class="info-card">
-                        <h3>Pendentes</h3>
-                        <p class="big" id="pendentes-qtd">0</p>
-                        <span id="pendentes-valor">R$ 0,00</span>
-                    </div>
-
-                    <div class="info-card">
-                        <h3>Atrasadas</h3>
-                        <p class="big" id="atrasadas-qtd">0</p>
-                        <span id="atrasadas-valor">R$ 0,00</span>
-                    </div>
-
-                    <div class="info-card">
-                        <h3>Em dia</h3>
-                        <p class="big" id="emdia-qtd">0</p>
-                        <span id="emdia-valor">R$ 0,00</span>
-                    </div>
-                </div>
-
-                <div class="actions-row">
-                    <button id="btn-atualizar-dashboard" class="btn primary">
-                        Atualizar Dashboard
-                    </button>
-
-                    <button id="btn-exportar-excel-dashboard" class="btn">
-                        Exportar Excel (todas as faturas)
-                    </button>
-                </div>
+          <div class="row g-3 align-items-end mb-3">
+            <div class="col-sm-4 col-md-3">
+              <label class="form-label">Transportadora</label>
+              <input id="filtro-transportadora" class="form-control" placeholder="Ex: DHL" />
             </div>
-        </section>
-
-        <!-- LISTA DE FATURAS -->
-        <section id="page-faturas" class="page">
-            <div class="card large">
-                <h2>Faturas</h2>
-
-                <div class="filters-row">
-                    <label>
-                        Transportadora:
-                        <input type="text" id="filtro-transportadora" placeholder="Ex: DHL">
-                    </label>
-                    <button id="btn-filtrar" class="btn">Filtrar</button>
-                    <button id="btn-limpar-filtro" class="btn ghost">Limpar</button>
-                    <button id="btn-exportar-excel" class="btn">
-                        Exportar Excel (todas as faturas)
-                    </button>
-                </div>
-
-                <table class="table" id="tabela-faturas">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Transportadora</th>
-                            <th>Nº Fatura</th>
-                            <th>Valor</th>
-                            <th>Vencimento</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- preenchido via JS -->
-                    </tbody>
-                </table>
+            <div class="col-sm-8 col-md-9 d-flex flex-wrap gap-2">
+              <button id="btn-aplicar-filtro" class="btn btn-ms">Aplicar filtro</button>
+              <button id="btn-limpar-filtro" class="btn btn-outline-secondary">Limpar</button>
+              <button id="btn-exportar-filtro" class="btn btn-outline-success">
+                Exportar Excel (filtro)
+              </button>
+              <button id="btn-exportar-todas" class="btn btn-outline-success">
+                Exportar Excel (todas)
+              </button>
             </div>
-        </section>
+          </div>
 
-        <!-- CADASTRO -->
-        <section id="page-cadastro" class="page">
-            <div class="card small">
-                <h2>Cadastro de Fatura</h2>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Transportadora</th>
+                  <th>Nº Fatura</th>
+                  <th>Valor</th>
+                  <th>Vencimento</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="tabela-faturas">
+                <!-- preenchido via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
 
-                <form id="form-cadastro">
-                    <div class="form-row">
-                        <label>Transportadora
-                            <input type="text" name="transportadora" required>
-                        </label>
-                        <label>Nº Fatura
-                            <input type="text" name="numero_fatura" required>
-                        </label>
-                    </div>
+    <!-- Página Cadastro -->
+    <section id="page-cadastro" class="page">
+      <div class="row">
+        <div class="col-lg-6">
+          <div class="card shadow-sm border-0">
+            <div class="card-body">
+              <h4 class="mb-3">Cadastro de Fatura</h4>
 
-                    <div class="form-row">
-                        <label>Valor
-                            <input type="number" step="0.01" name="valor" required>
-                        </label>
-                        <label>Data de vencimento
-                            <input type="date" name="data_vencimento" required>
-                        </label>
-                    </div>
+              <div class="mb-3">
+                <label class="form-label">Transportadora</label>
+                <input id="cad-transportadora" class="form-control" />
+              </div>
 
-                    <div class="form-row">
-                        <label>Status
-                            <select name="status">
-                                <option value="pendente">Pendente</option>
-                                <option value="pago">Pago</option>
-                            </select>
-                        </label>
-                    </div>
+              <div class="mb-3">
+                <label class="form-label">Número da Fatura</label>
+                <input id="cad-numero" class="form-control" />
+              </div>
 
-                    <div class="form-row end">
-                        <button type="submit" class="btn primary">
-                            Salvar fatura
-                        </button>
-                    </div>
-                </form>
+              <div class="mb-3">
+                <label class="form-label">Valor</label>
+                <input id="cad-valor" type="number" step="0.01" class="form-control" />
+              </div>
 
-                <p id="mensagem-cadastro" class="msg"></p>
+              <div class="mb-3">
+                <label class="form-label">Data de Vencimento</label>
+                <input id="cad-vencimento" type="date" class="form-control" />
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label">Status</label>
+                <select id="cad-status" class="form-select">
+                  <option value="pendente" selected>Pendente</option>
+                  <option value="pago">Pago</option>
+                  <option value="em dia">Em dia</option>
+                  <option value="atrasada">Atrasada</option>
+                </select>
+              </div>
+
+              <button id="btn-salvar-fatura" class="btn btn-ms">Salvar Fatura</button>
+              <p id="cadastro-msg" class="mt-3 small"></p>
             </div>
-        </section>
-    </main>
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <script src="/static/app.js"></script>
+    <!-- Página Dashboard -->
+    <section id="page-dashboard" class="page">
+      <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+          <h4 class="mb-3">Dashboard</h4>
+          <div class="row g-3 mb-3">
+            <div class="col-md-3">
+              <div class="card-dashboard">
+                <h6>Valor total</h6>
+                <div id="dash-total-valor" class="valor">R$ 0,00</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card-dashboard">
+                <h6>Pendentes</h6>
+                <div id="dash-pendentes-qtd" class="valor">0</div>
+                <div id="dash-pendentes-valor" class="detalhe">R$ 0,00</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card-dashboard">
+                <h6>Atrasadas</h6>
+                <div id="dash-atrasadas-qtd" class="valor">0</div>
+                <div id="dash-atrasadas-valor" class="detalhe">R$ 0,00</div>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <div class="card-dashboard">
+                <h6>Em dia / Pagas</h6>
+                <div id="dash-emdia-qtd" class="valor">0</div>
+                <div id="dash-emdia-valor" class="detalhe">R$ 0,00</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2">
+            <button id="btn-atualizar-dashboard" class="btn btn-ms">
+              Atualizar Dashboard
+            </button>
+            <button id="btn-exportar-dashboard" class="btn btn-outline-success">
+              Exportar Excel (todas as faturas)
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const API_BASE = "";  // mesma origem (Render)
+
+    // Navegação entre abas
+    document.querySelectorAll(".navbar-ms .nav-link").forEach(link => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const pageId = link.dataset.page;
+
+        document.querySelectorAll(".navbar-ms .nav-link").forEach(l => l.classList.remove("active"));
+        document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+
+        link.classList.add("active");
+        document.getElementById(pageId).classList.add("active");
+
+        if (pageId === "page-faturas") {
+          carregarFaturas();
+        } else if (pageId === "page-dashboard") {
+          carregarDashboard();
+        }
+      });
+    });
+
+    // Utilidades
+    function formatarValorBR(valor) {
+      return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    }
+
+    function carregarFaturas() {
+      const filtro = document.getElementById("filtro-transportadora").value.trim();
+      let url = API_BASE + "/faturas";
+      if (filtro) {
+        url += "?transportadora=" + encodeURIComponent(filtro);
+      }
+
+      fetch(url)
+        .then(r => r.json())
+        .then(dados => {
+          const tbody = document.getElementById("tabela-faturas");
+          tbody.innerHTML = "";
+          dados.forEach(f => {
+            const tr = document.createElement("tr");
+            const valorNum = Number(f.valor || 0);
+            const dataVenc = f.data_vencimento
+              ? new Date(f.data_vencimento).toLocaleDateString("pt-BR")
+              : "";
+
+            tr.innerHTML = `
+              <td>${f.id}</td>
+              <td>${f.transportadora}</td>
+              <td>${f.numero_fatura}</td>
+              <td>${formatarValorBR(valorNum)}</td>
+              <td>${dataVenc}</td>
+              <td>${f.status}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        })
+        .catch(err => console.error("Erro ao carregar faturas", err));
+    }
+
+    function carregarDashboard() {
+      fetch(API_BASE + "/dashboard-resumo")
+        .then(r => r.json())
+        .then(d => {
+          document.getElementById("dash-total-valor").textContent = formatarValorBR(d.total_valor || 0);
+
+          document.getElementById("dash-pendentes-qtd").textContent = d.pendentes.quantidade;
+          document.getElementById("dash-pendentes-valor").textContent = formatarValorBR(d.pendentes.valor || 0);
+
+          document.getElementById("dash-atrasadas-qtd").textContent = d.atrasadas.quantidade;
+          document.getElementById("dash-atrasadas-valor").textContent = formatarValorBR(d.atrasadas.valor || 0);
+
+          document.getElementById("dash-emdia-qtd").textContent = d.em_dia.quantidade;
+          document.getElementById("dash-emdia-valor").textContent = formatarValorBR(d.em_dia.valor || 0);
+        })
+        .catch(err => console.error("Erro ao carregar dashboard", err));
+    }
+
+    function exportarExcel(filtroTransportadora) {
+      let url = API_BASE + "/faturas/exportar";
+      if (filtroTransportadora) {
+        url += "?transportadora=" + encodeURIComponent(filtroTransportadora);
+      }
+      window.location.href = url; // dispara download
+    }
+
+    // Eventos botões filtros
+    document.getElementById("btn-aplicar-filtro").addEventListener("click", () => {
+      carregarFaturas();
+    });
+
+    document.getElementById("btn-limpar-filtro").addEventListener("click", () => {
+      document.getElementById("filtro-transportadora").value = "";
+      carregarFaturas();
+    });
+
+    document.getElementById("btn-exportar-filtro").addEventListener("click", () => {
+      const filtro = document.getElementById("filtro-transportadora").value.trim();
+      exportarExcel(filtro || null);
+    });
+
+    document.getElementById("btn-exportar-todas").addEventListener("click", () => {
+      exportarExcel(null);
+    });
+
+    document.getElementById("btn-atualizar-dashboard").addEventListener("click", () => {
+      carregarDashboard();
+    });
+
+    document.getElementById("btn-exportar-dashboard").addEventListener("click", () => {
+      exportarExcel(null);
+    });
+
+    // Cadastro de fatura
+    document.getElementById("btn-salvar-fatura").addEventListener("click", () => {
+      const payload = {
+        transportadora: document.getElementById("cad-transportadora").value.trim(),
+        numero_fatura: document.getElementById("cad-numero").value.trim(),
+        valor: Number(document.getElementById("cad-valor").value || 0),
+        data_vencimento: document.getElementById("cad-vencimento").value,
+        status: document.getElementById("cad-status").value,
+      };
+
+      if (!payload.transportadora || !payload.numero_fatura || !payload.data_vencimento) {
+        document.getElementById("cadastro-msg").textContent = "Preencha transportadora, número e vencimento.";
+        document.getElementById("cadastro-msg").className = "mt-3 small text-danger";
+        return;
+      }
+
+      fetch(API_BASE + "/faturas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+        .then(r => {
+          if (!r.ok) throw new Error("Erro ao salvar");
+          return r.json();
+        })
+        .then(() => {
+          document.getElementById("cadastro-msg").textContent = "Fatura salva com sucesso!";
+          document.getElementById("cadastro-msg").className = "mt-3 small text-success";
+          document.getElementById("cad-transportadora").value = "";
+          document.getElementById("cad-numero").value = "";
+          document.getElementById("cad-valor").value = "";
+          document.getElementById("cad-vencimento").value = "";
+          document.getElementById("cad-status").value = "pendente";
+
+          carregarFaturas();
+          carregarDashboard();
+        })
+        .catch(() => {
+          document.getElementById("cadastro-msg").textContent = "Erro ao salvar fatura.";
+          document.getElementById("cadastro-msg").className = "mt-3 small text-danger";
+        });
+    });
+
+    // Carregar lista na primeira abertura
+    carregarFaturas();
+  </script>
 </body>
 </html>
