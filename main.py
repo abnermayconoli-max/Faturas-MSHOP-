@@ -224,13 +224,13 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
 def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[date] = Query(None),
+    ate_vencimento: Optional[str] = Query(None),  # <-- string, não date
     numero_fatura: Optional[str] = Query(None),
 ):
     """
     Lista faturas com filtros opcionais:
     - transportadora (contains)
-    - ate_vencimento (data vencimento <=)
+    - ate_vencimento (data vencimento <=, se informado no formato AAAA-MM-DD)
     - numero_fatura (contains)
     """
     query = db.query(FaturaDB)
@@ -238,8 +238,14 @@ def listar_faturas(
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
+    # trata a data manualmente para evitar erro 422
     if ate_vencimento:
-        query = query.filter(FaturaDB.data_vencimento <= ate_vencimento)
+        try:
+            filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            query = query.filter(FaturaDB.data_vencimento <= filtro_data)
+        except ValueError:
+            # se a data vier em formato estranho, simplesmente ignora o filtro
+            pass
 
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
