@@ -45,6 +45,7 @@
 
         <div class="sidebar-section">
             <h2>Filtro por vencimento</h2>
+            <!-- input date já mostra o calendário -->
             <input type="date" id="filtroVencimento" />
             <button id="btnLimparFiltros" class="sidebar-btn">
                 Limpar filtros
@@ -57,6 +58,7 @@
         <!-- ABAS -->
         <div class="tabs">
             <button id="tabDashboard" class="tab active">Dashboard</button>
+            <button id="tabCadastro" class="tab">Cadastro</button>
             <button id="tabFaturas" class="tab">Faturas</button>
         </div>
 
@@ -83,19 +85,8 @@
             </div>
         </section>
 
-        <!-- FATURAS -->
-        <section id="faturasSection" class="section">
-            <header class="filtros-header">
-                <div>
-                    <label for="buscaNumero">Buscar nº de fatura:</label>
-                    <input type="text" id="buscaNumero" placeholder="Ex: 12345" />
-                </div>
-                <button id="btnAtualizarFaturas" class="primary">
-                    Atualizar lista
-                </button>
-            </header>
-
-            <!-- FORM DE CADASTRO RÁPIDO -->
+        <!-- CADASTRO (somente o formulário) -->
+        <section id="cadastroSection" class="section">
             <section class="form-section">
                 <h2>Cadastro de Fatura</h2>
                 <form id="formFatura">
@@ -114,16 +105,16 @@
                         </div>
                         <div class="form-group">
                             <label>Data vencimento</label>
+                            <!-- já vem com calendário -->
                             <input type="date" id="inputVencimento" required />
                         </div>
                         <div class="form-group">
                             <label>Status</label>
-                           <select id="inputStatus">
-    <option value="pendente">Pendente</option>
-    <option value="pago">Pago</option>
-    <option value="atrasado">Atrasado</option>
-</select>
-
+                            <select id="inputStatus">
+                                <option value="pendente">Pendente</option>
+                                <option value="pago">Pago</option>
+                                <option value="atrasado">Atrasado</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label>Observação</label>
@@ -139,6 +130,19 @@
                     </button>
                 </form>
             </section>
+        </section>
+
+        <!-- FATURAS (lista + filtros de número / atualizar) -->
+        <section id="faturasSection" class="section">
+            <header class="filtros-header">
+                <div>
+                    <label for="buscaNumero">Buscar nº de fatura:</label>
+                    <input type="text" id="buscaNumero" placeholder="Ex: 12345" />
+                </div>
+                <button id="btnAtualizarFaturas" class="primary">
+                    Atualizar lista
+                </button>
+            </header>
 
             <!-- TABELA DE FATURAS -->
             <section class="table-section">
