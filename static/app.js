@@ -10,7 +10,12 @@ let filtroNumeroFatura = "";
 
 function formatCurrency(valor) {
   if (valor === null || valor === undefined) return "R$ 0,00";
-  return valor.toLocaleString("pt-BR", {
+
+  // Se vier string, converte pra número
+  const n = typeof valor === "string" ? Number(valor) : valor;
+  if (Number.isNaN(n)) return "R$ 0,00";
+
+  return n.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
     minimumFractionDigits: 2,
@@ -39,18 +44,27 @@ async function carregarDashboard() {
         : `${API_BASE}/dashboard/resumo`;
 
     const resp = await fetch(url);
-    if (!resp.ok) throw new Error("Erro ao buscar resumo");
+
+    if (!resp.ok) {
+      const texto = await resp.text();
+      console.error("Erro HTTP ao buscar resumo:", resp.status, texto);
+      throw new Error("Erro ao buscar resumo");
+    }
 
     const data = await resp.json();
 
-    document.getElementById("cardTotal").textContent = formatCurrency(data.total);
+    document.getElementById("cardTotal").textContent = formatCurrency(
+      data.total
+    );
     document.getElementById("cardPendentes").textContent = formatCurrency(
       data.pendentes
     );
     document.getElementById("cardAtrasadas").textContent = formatCurrency(
       data.atrasadas
     );
-    document.getElementById("cardEmDia").textContent = formatCurrency(data.em_dia);
+    document.getElementById("cardEmDia").textContent = formatCurrency(
+      data.em_dia
+    );
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar dashboard");
@@ -78,9 +92,19 @@ async function carregarFaturas() {
         : `${API_BASE}/faturas`;
 
     const resp = await fetch(url);
-    if (!resp.ok) throw new Error("Erro ao listar faturas");
+
+    if (!resp.ok) {
+      const texto = await resp.text();
+      console.error(
+        "Erro HTTP ao listar faturas:",
+        resp.status,
+        texto || "(sem corpo)"
+      );
+      throw new Error("Erro ao listar faturas");
+    }
 
     const faturas = await resp.json();
+
     const tbody = document.getElementById("tbodyFaturas");
     tbody.innerHTML = "";
 
@@ -153,7 +177,11 @@ async function excluirFatura(id) {
     const resp = await fetch(`${API_BASE}/faturas/${id}`, {
       method: "DELETE",
     });
-    if (!resp.ok) throw new Error("Erro ao excluir");
+    if (!resp.ok) {
+      const texto = await resp.text();
+      console.error("Erro ao excluir:", resp.status, texto);
+      throw new Error("Erro ao excluir");
+    }
     await carregarFaturas();
     await carregarDashboard();
   } catch (err) {
@@ -182,7 +210,12 @@ async function abrirModalAnexos(faturaId) {
 
   try {
     const resp = await fetch(`${API_BASE}/faturas/${faturaId}/anexos`);
-    if (!resp.ok) throw new Error("Erro ao listar anexos");
+    if (!resp.ok) {
+      const texto = await resp.text();
+      console.error("Erro ao listar anexos:", resp.status, texto);
+      throw new Error("Erro ao listar anexos");
+    }
+
     const anexos = await resp.json();
 
     if (anexos.length === 0) {
@@ -240,7 +273,12 @@ async function salvarFatura(e) {
       });
     }
 
-    if (!resp.ok) throw new Error("Erro ao salvar fatura");
+    if (!resp.ok) {
+      const texto = await resp.text();
+      console.error("Erro ao salvar fatura:", resp.status, texto);
+      throw new Error("Erro ao salvar fatura");
+    }
+
     const fatura = await resp.json();
 
     const inputAnexos = document.getElementById("inputAnexos");
@@ -257,7 +295,8 @@ async function salvarFatura(e) {
         }
       );
       if (!respAnexos.ok) {
-        console.error("Erro ao enviar anexos");
+        const texto = await respAnexos.text();
+        console.error("Erro ao enviar anexos:", respAnexos.status, texto);
       }
     }
 
@@ -306,8 +345,10 @@ document.addEventListener("DOMContentLoaded", () => {
     filtroTransportadora = "";
     filtroVencimento = "";
     filtroNumeroFatura = "";
+
     const filtroVencInput = document.getElementById("filtroVencimento");
     if (filtroVencInput) filtroVencInput.value = "";
+
     const buscaNumero = document.getElementById("buscaNumero");
     if (buscaNumero) buscaNumero.value = "";
 
@@ -373,6 +414,7 @@ document.addEventListener("DOMContentLoaded", () => {
     .addEventListener("click", () =>
       document.getElementById("modalAnexos").classList.remove("open")
     );
+
   document
     .getElementById("modalAnexos")
     .addEventListener("click", (e) => {
