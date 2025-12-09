@@ -11,7 +11,6 @@ let filtroNumeroFatura = "";
 function formatCurrency(valor) {
   if (valor === null || valor === undefined) return "R$ 0,00";
 
-  // Se vier string, converte pra número
   const n = typeof valor === "string" ? Number(valor) : valor;
   if (Number.isNaN(n)) return "R$ 0,00";
 
@@ -149,6 +148,7 @@ async function carregarFaturas() {
           await excluirFatura(f.id);
         } else if (acao === "editar") {
           preencherFormularioEdicao(f);
+          ativarAba("cadastro"); // opcional: já abre aba de cadastro para editar
         } else if (acao === "anexos") {
           abrirModalAnexos(f.id);
         }
@@ -279,7 +279,7 @@ async function salvarFatura(e) {
       throw new Error("Erro ao salvar fatura");
     }
 
-    const fatura = await resp.json();
+    await resp.json();
 
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos.files.length > 0) {
@@ -288,7 +288,7 @@ async function salvarFatura(e) {
         fd.append("files", file);
       }
       const respAnexos = await fetch(
-        `${API_BASE}/faturas/${fatura.id}/anexos`,
+        `${API_BASE}/faturas/${editId || ""}/anexos`,
         {
           method: "POST",
           body: fd,
@@ -304,6 +304,7 @@ async function salvarFatura(e) {
     delete form.dataset.editId;
     await carregarFaturas();
     await carregarDashboard();
+    ativarAba("faturas"); // depois de salvar, vai pra lista
   } catch (err) {
     console.error(err);
     alert("Erro ao salvar fatura");
@@ -314,20 +315,26 @@ async function salvarFatura(e) {
 
 function ativarAba(aba) {
   const dash = document.getElementById("dashboardSection");
+  const cad = document.getElementById("cadastroSection");
   const fat = document.getElementById("faturasSection");
+
   const tabDash = document.getElementById("tabDashboard");
+  const tabCad = document.getElementById("tabCadastro");
   const tabFat = document.getElementById("tabFaturas");
+
+  // esconde tudo
+  [dash, cad, fat].forEach((sec) => sec.classList.remove("visible"));
+  [tabDash, tabCad, tabFat].forEach((t) => t.classList.remove("active"));
 
   if (aba === "dashboard") {
     dash.classList.add("visible");
-    fat.classList.remove("visible");
     tabDash.classList.add("active");
-    tabFat.classList.remove("active");
+  } else if (aba === "cadastro") {
+    cad.classList.add("visible");
+    tabCad.classList.add("active");
   } else {
     fat.classList.add("visible");
-    dash.classList.remove("visible");
     tabFat.classList.add("active");
-    tabDash.classList.remove("active");
   }
 }
 
@@ -337,6 +344,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("tabDashboard").addEventListener("click", () =>
     ativarAba("dashboard")
   );
+  document.getElementById("tabCadastro").addEventListener("click", () =>
+    ativarAba("cadastro")
+  );
   document.getElementById("tabFaturas").addEventListener("click", () =>
     ativarAba("faturas")
   );
@@ -345,10 +355,8 @@ document.addEventListener("DOMContentLoaded", () => {
     filtroTransportadora = "";
     filtroVencimento = "";
     filtroNumeroFatura = "";
-
     const filtroVencInput = document.getElementById("filtroVencimento");
     if (filtroVencInput) filtroVencInput.value = "";
-
     const buscaNumero = document.getElementById("buscaNumero");
     if (buscaNumero) buscaNumero.value = "";
 
