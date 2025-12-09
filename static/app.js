@@ -1,6 +1,7 @@
+// URL base (vazio = mesmo domínio)
 const API_BASE = "";
 
-// filtros globais
+// Estado de filtros
 let filtroTransportadora = "";
 let filtroVencimento = "";
 let filtroNumeroFatura = "";
@@ -33,27 +34,23 @@ async function carregarDashboard() {
     }
 
     const url =
-      params.toString() === ""
-        ? `${API_BASE}/dashboard/resumo`
-        : `${API_BASE}/dashboard/resumo?${params.toString()}`;
+      params.toString().length > 0
+        ? `${API_BASE}/dashboard/resumo?${params.toString()}`
+        : `${API_BASE}/dashboard/resumo`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error("Erro ao buscar resumo");
 
     const data = await resp.json();
 
-    document.getElementById("cardTotal").textContent = formatCurrency(
-      data.total
-    );
+    document.getElementById("cardTotal").textContent = formatCurrency(data.total);
     document.getElementById("cardPendentes").textContent = formatCurrency(
       data.pendentes
     );
     document.getElementById("cardAtrasadas").textContent = formatCurrency(
       data.atrasadas
     );
-    document.getElementById("cardEmDia").textContent = formatCurrency(
-      data.em_dia
-    );
+    document.getElementById("cardEmDia").textContent = formatCurrency(data.em_dia);
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar dashboard");
@@ -76,9 +73,9 @@ async function carregarFaturas() {
     }
 
     const url =
-      params.toString() === ""
-        ? `${API_BASE}/faturas`
-        : `${API_BASE}/faturas?${params.toString()}`;
+      params.toString().length > 0
+        ? `${API_BASE}/faturas?${params.toString()}`
+        : `${API_BASE}/faturas`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error("Erro ao listar faturas");
@@ -244,7 +241,7 @@ async function salvarFatura(e) {
     }
 
     if (!resp.ok) throw new Error("Erro ao salvar fatura");
-    const faturaCriadaOuEditada = await resp.json();
+    const fatura = await resp.json();
 
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos.files.length > 0) {
@@ -253,7 +250,7 @@ async function salvarFatura(e) {
         fd.append("files", file);
       }
       const respAnexos = await fetch(
-        `${API_BASE}/faturas/${faturaCriadaOuEditada.id}/anexos`,
+        `${API_BASE}/faturas/${fatura.id}/anexos`,
         {
           method: "POST",
           body: fd,
@@ -309,8 +306,11 @@ document.addEventListener("DOMContentLoaded", () => {
     filtroTransportadora = "";
     filtroVencimento = "";
     filtroNumeroFatura = "";
-    document.getElementById("filtroVencimento").value = "";
-    document.getElementById("buscaNumero").value = "";
+    const filtroVencInput = document.getElementById("filtroVencimento");
+    if (filtroVencInput) filtroVencInput.value = "";
+    const buscaNumero = document.getElementById("buscaNumero");
+    if (buscaNumero) buscaNumero.value = "";
+
     ativarAba("dashboard");
     carregarDashboard();
     carregarFaturas();
@@ -323,48 +323,56 @@ document.addEventListener("DOMContentLoaded", () => {
         .querySelectorAll(".transportadora-btn")
         .forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
-
-      // quando clicar na transportadora: filtra Faturas + Dashboard
+      ativarAba("faturas");
       carregarFaturas();
       carregarDashboard();
     })
   );
 
-  document
-    .getElementById("filtroVencimento")
-    .addEventListener("change", (e) => {
+  const filtroVencInput = document.getElementById("filtroVencimento");
+  if (filtroVencInput) {
+    filtroVencInput.addEventListener("change", (e) => {
       filtroVencimento = e.target.value;
       carregarFaturas();
       carregarDashboard();
     });
+  }
 
-  document.getElementById("btnLimparFiltros").addEventListener("click", () => {
-    filtroVencimento = "";
-    document.getElementById("filtroVencimento").value = "";
-    filtroNumeroFatura = "";
-    document.getElementById("buscaNumero").value = "";
-    carregarFaturas();
-    carregarDashboard();
-  });
+  const btnLimparFiltros = document.getElementById("btnLimparFiltros");
+  if (btnLimparFiltros) {
+    btnLimparFiltros.addEventListener("click", () => {
+      filtroVencimento = "";
+      filtroNumeroFatura = "";
+      if (filtroVencInput) filtroVencInput.value = "";
+      const buscaNumero = document.getElementById("buscaNumero");
+      if (buscaNumero) buscaNumero.value = "";
+      carregarFaturas();
+      carregarDashboard();
+    });
+  }
 
-  document
-    .getElementById("buscaNumero")
-    .addEventListener("input", (e) => {
+  const buscaNumero = document.getElementById("buscaNumero");
+  if (buscaNumero) {
+    buscaNumero.addEventListener("input", (e) => {
       filtroNumeroFatura = e.target.value.trim();
       carregarFaturas();
     });
+  }
 
-  document
-    .getElementById("btnAtualizarFaturas")
-    .addEventListener("click", carregarFaturas);
+  const btnAtualizar = document.getElementById("btnAtualizarFaturas");
+  if (btnAtualizar) {
+    btnAtualizar.addEventListener("click", carregarFaturas);
+  }
 
   document
     .getElementById("formFatura")
     .addEventListener("submit", salvarFatura);
 
-  document.getElementById("modalFechar").addEventListener("click", () =>
-    document.getElementById("modalAnexos").classList.remove("open")
-  );
+  document
+    .getElementById("modalFechar")
+    .addEventListener("click", () =>
+      document.getElementById("modalAnexos").classList.remove("open")
+    );
   document
     .getElementById("modalAnexos")
     .addEventListener("click", (e) => {
