@@ -175,7 +175,7 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -198,21 +198,35 @@ def health_check():
 
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
-    responsavel = get_responsavel(fatura.transportadora)
+    """
+    Cria uma fatura. Foi colocado try/except para evitar erro 500 bruto.
+    Se o banco reclamar (ex: coluna, tipo, etc) devolve 400 com detalhe.
+    """
+    try:
+        responsavel = get_responsavel(fatura.transportadora)
 
-    db_fatura = FaturaDB(
-        transportadora=fatura.transportadora,
-        numero_fatura=fatura.numero_fatura,
-        valor=fatura.valor,
-        data_vencimento=fatura.data_vencimento,
-        status=fatura.status,
-        observacao=fatura.observacao,
-        responsavel=responsavel,
-    )
-    db.add(db_fatura)
-    db.commit()
-    db.refresh(db_fatura)
-    return db_fatura
+        db_fatura = FaturaDB(
+            transportadora=fatura.transportadora,
+            numero_fatura=fatura.numero_fatura,
+            valor=fatura.valor,
+            data_vencimento=fatura.data_vencimento,
+            status=fatura.status,
+            observacao=fatura.observacao,
+            responsavel=responsavel,
+        )
+        db.add(db_fatura)
+        db.commit()
+        db.refresh(db_fatura)
+        return db_fatura
+
+    except Exception as exc:
+        # log no console do Render
+        print("ERRO AO CRIAR FATURA:", exc)
+        # devolve 400 pro front (aí o fetch não fica 500)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Erro ao criar fatura: {exc}",
+        )
 
 
 @app.get("/faturas")
@@ -224,7 +238,7 @@ def listar_faturas(
 ):
     """
     Lista faturas com filtros opcionais.
-    Essa rota foi deixada **bem defensiva** para evitar 500 e não quebrar o front.
+    Rota defensiva para não quebrar e não gerar 500.
     """
     try:
         query = db.query(FaturaDB)
@@ -237,7 +251,7 @@ def listar_faturas(
                 filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
                 query = query.filter(FaturaDB.data_vencimento <= filtro_data)
             except ValueError:
-                # Se vier data em formato esquisito, ignora o filtro e segue.
+                # Se vier data em formato estranho, ignora o filtro
                 pass
 
         if numero_fatura:
@@ -245,7 +259,7 @@ def listar_faturas(
 
         faturas_db: List[FaturaDB] = query.order_by(FaturaDB.id).all()
 
-        # Converte manualmente para dict para evitar qualquer problema de serialização
+        # Converte manualmente para dict para evitar problema de serialização
         resultado: List[dict[str, Any]] = []
         for f in faturas_db:
             resultado.append(
@@ -266,9 +280,9 @@ def listar_faturas(
         return resultado
 
     except Exception as exc:
-        # Log no console do Render (não quebra o front)
         print("ERRO NA ROTA /faturas:", exc)
-        return []  # front recebe lista vazia em vez de 500
+        # devolve lista vazia em vez de 500 (o front só mostra “sem faturas”)
+        return []
 
 
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
@@ -401,12 +415,10 @@ def resumo_dashboard(
             FaturaDB.transportadora.ilike(f"%{transportadora}%")
         )
 
-    # Total (todas as faturas da transportadora, qualquer status)
     total = query_base.with_entities(
         func.coalesce(func.sum(FaturaDB.valor), 0)
     ).scalar()
 
-    # Apenas pendentes
     pendentes_q = query_base.filter(FaturaDB.status.ilike("pendente"))
     pendentes_val = pendentes_q.with_entities(
         func.coalesce(func.sum(FaturaDB.valor), 0)
