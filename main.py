@@ -10,11 +10,11 @@ from fastapi import (
     UploadFile,
     File,
     Query,
+    Request,
 )
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -45,8 +45,9 @@ Base = declarative_base()
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
 
+
 # =========================
-# MODELO SQLALCHEMY
+# MODELOS SQLALCHEMY
 # =========================
 
 
@@ -94,14 +95,17 @@ Base.metadata.create_all(bind=engine)
 class FaturaBase(BaseModel):
     transportadora: str
     numero_fatura: str
-    valor: float
-    data_vencimento: date
+    # Deixa valor e data opcionais para NÃO quebrar quando tiver registro antigo com NULL
+    valor: Optional[float] = 0
+    data_vencimento: Optional[date] = None
     status: str = "pendente"
     observacao: Optional[str] = None
 
 
 class FaturaCreate(FaturaBase):
-    pass
+    # Para criar continua obrigatório ter valor e data
+    valor: float
+    data_vencimento: date
 
 
 class FaturaUpdate(BaseModel):
@@ -152,7 +156,6 @@ RESP_MAP = {
 
 
 def get_responsavel(transportadora: str) -> Optional[str]:
-    # Tenta bater nome exato, depois só primeira parte
     if transportadora in RESP_MAP:
         return RESP_MAP[transportadora]
     base = transportadora.split("-")[0].strip()
@@ -177,13 +180,10 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.4.0",
+    version="0.4.1",
 )
 
-# /static -> arquivos estáticos (css/js)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# / -> template Jinja
 templates = Jinja2Templates(directory="templates")
 
 
@@ -224,7 +224,7 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
 def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),  # <-- string, não date
+    ate_vencimento: Optional[str] = Query(None),  # string para não dar 422
     numero_fatura: Optional[str] = Query(None),
 ):
     """
@@ -238,13 +238,12 @@ def listar_faturas(
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
-    # trata a data manualmente para evitar erro 422
     if ate_vencimento:
         try:
             filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
             query = query.filter(FaturaDB.data_vencimento <= filtro_data)
         except ValueError:
-            # se a data vier em formato estranho, simplesmente ignora o filtro
+            # se vier em formato estranho, ignora o filtro em vez de quebrar
             pass
 
     if numero_fatura:
@@ -277,7 +276,6 @@ def atualizar_fatura(
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
-    # Se mudar transportadora, recalcula responsável
     if "transportadora" in data:
         fatura.responsavel = get_responsavel(fatura.transportadora)
 
@@ -292,7 +290,6 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # Remove arquivos do disco
     for anexo in fatura.anexos:
         caminho = os.path.join(ANEXOS_DIR, anexo.filename)
         if os.path.exists(caminho):
@@ -373,23 +370,33 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
 @app.get("/dashboard/resumo")
 def resumo_dashboard(db: Session = Depends(get_db)):
     hoje = date.today()
-    total = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
+
+    # pendentes = status pendente ou atrasado
+    base_query = db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
+
+    total = base_query.scalar()
 
     pendentes_val = (
-        db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .filter(FaturaDB.status.ilike("pendente"))
+        base_query
+        .filter(FaturaDB.status.in_(["pendente", "atrasado"]))
         .scalar()
     )
 
     atrasadas_val = (
-        db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .filter(FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento < hoje)
+        base_query
+        .filter(
+            FaturaDB.status.in_(["pendente", "atrasado"]),
+            FaturaDB.data_vencimento < hoje
+        )
         .scalar()
     )
 
     em_dia_val = (
-        db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .filter(FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento >= hoje)
+        base_query
+        .filter(
+            FaturaDB.status.in_(["pendente", "atrasado"]),
+            FaturaDB.data_vencimento >= hoje
+        )
         .scalar()
     )
 
