@@ -10,11 +10,11 @@ from fastapi import (
     UploadFile,
     File,
     Query,
+    Request,
 )
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -46,7 +46,7 @@ ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
 
 # =========================
-# MODELOS SQLALCHEMY
+# MODELO SQLALCHEMY
 # =========================
 
 
@@ -177,10 +177,13 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.5.0",
+    version="0.4.0",
 )
 
+# /static -> arquivos estáticos (css/js)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# / -> template Jinja
 templates = Jinja2Templates(directory="templates")
 
 
@@ -217,54 +220,38 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     return db_fatura
 
 
-# >>>>>>> FUNÇÃO QUE ESTAVA DANDO ERRO <<<<<<<
-# Aqui eu removi o response_model e faço a serialização "na mão".
-# Isso evita erro 500 silencioso e some o alerta "Erro ao carregar faturas".
-@app.get("/faturas")
-def listar_faturas(
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),  # string para não dar 422
-    numero_fatura: Optional[str] = Query(None),
-):
+@app.get("/faturas", response_model=List[FaturaOut])
+def listar_faturas(request: Request, db: Session = Depends(get_db)):
+    """
+    Lista faturas com filtros opcionais lidos da query string:
+    - transportadora
+    - ate_vencimento (AAAA-MM-DD)
+    - numero_fatura
+    """
+
+    params = request.query_params
+    transportadora = params.get("transportadora") or None
+    ate_vencimento = params.get("ate_vencimento") or None
+    numero_fatura = params.get("numero_fatura") or None
+
     query = db.query(FaturaDB)
 
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
     if ate_vencimento:
+        # tenta converter para data; se der erro, ignora o filtro
         try:
             filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
             query = query.filter(FaturaDB.data_vencimento <= filtro_data)
         except ValueError:
-            # Se vier algo estranho, ignora o filtro e NÃO quebra a API
             pass
 
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
-    faturas = query.order_by(FaturaDB.id).all()
-
-    # monta resposta manualmente (compatível com o front atual)
-    resultado = []
-    for f in faturas:
-        resultado.append(
-            {
-                "id": f.id,
-                "transportadora": f.transportadora,
-                "numero_fatura": f.numero_fatura,
-                "valor": float(f.valor or 0),
-                "data_vencimento": (
-                    f.data_vencimento.isoformat() if f.data_vencimento else None
-                ),
-                "status": f.status,
-                "observacao": f.observacao,
-                "responsavel": f.responsavel,
-            }
-        )
-
-    return resultado
-# >>>>>>> FIM DA FUNÇÃO AJUSTADA <<<<<<<
+    query = query.order_by(FaturaDB.id)
+    return query.all()
 
 
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
@@ -290,6 +277,7 @@ def atualizar_fatura(
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
+    # Se mudar transportadora, recalcula responsável
     if "transportadora" in data:
         fatura.responsavel = get_responsavel(fatura.transportadora)
 
@@ -304,6 +292,7 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
+    # Remove arquivos do disco
     for anexo in fatura.anexos:
         caminho = os.path.join(ANEXOS_DIR, anexo.filename)
         if os.path.exists(caminho):
@@ -380,43 +369,41 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
 # =========================
 # DASHBOARD / EXPORT
 # =========================
-# Dashboard agora aceita transporteadora para filtrar os cards
+
 @app.get("/dashboard/resumo")
 def resumo_dashboard(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
 ):
+    """
+    Resumo geral do dashboard.
+    Se 'transportadora' vier na query, filtra apenas aquela.
+    """
     hoje = date.today()
 
     base_query = db.query(FaturaDB)
     if transportadora:
-        base_query = base_query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-
-    total = base_query.with_entities(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
-
-    pendentes_val = (
-        base_query.filter(FaturaDB.status.ilike("pendente"))
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
-
-    atrasadas_val = (
-        base_query.filter(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento < hoje,
+        base_query = base_query.filter(
+            FaturaDB.transportadora.ilike(f"%{transportadora}%")
         )
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
 
-    em_dia_val = (
-        base_query.filter(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento >= hoje,
-        )
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
+    total = base_query.with_entities(
+        func.coalesce(func.sum(FaturaDB.valor), 0)
+    ).scalar()
+
+    pendentes_val = base_query.filter(
+        FaturaDB.status.ilike("pendente")
+    ).with_entities(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
+
+    atrasadas_val = base_query.filter(
+        FaturaDB.status.ilike("pendente"),
+        FaturaDB.data_vencimento < hoje,
+    ).with_entities(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
+
+    em_dia_val = base_query.filter(
+        FaturaDB.status.ilike("pendente"),
+        FaturaDB.data_vencimento >= hoje,
+    ).with_entities(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
 
     return {
         "total": float(total or 0),
@@ -432,6 +419,9 @@ def exportar_faturas(
     transportadora: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
+    """
+    Exporta CSV (Excel abre normal).
+    """
     import csv
     import io
 
