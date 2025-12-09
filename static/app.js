@@ -10,7 +10,7 @@ let filtroNumeroFatura = "";
 
 function formatCurrency(valor) {
   if (valor === null || valor === undefined) return "R$ 0,00";
-  return valor.toLocaleString("pt-BR", {
+  return Number(valor).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
     minimumFractionDigits: 2,
@@ -242,10 +242,8 @@ async function salvarFatura(e) {
     }
 
     if (!resp.ok) {
-      const text = await resp.text();
-      console.error("Erro ao salvar fatura:", resp.status, text);
-      alert("Erro ao salvar fatura");
-      return;
+      console.error("Status ao salvar:", resp.status);
+      throw new Error("Erro ao salvar fatura");
     }
 
     const fatura = await resp.json();
@@ -290,25 +288,18 @@ function ativarAba(aba) {
   const tabCad = document.getElementById("tabCadastro");
   const tabFat = document.getElementById("tabFaturas");
 
-  [dash, cad, fat].forEach((sec) => sec.classList.remove("visible"));
-  [tabDash, tabCad, tabFat].forEach((t) => t.classList.remove("active"));
+  dash.classList.toggle("visible", aba === "dashboard");
+  cad.classList.toggle("visible", aba === "cadastro");
+  fat.classList.toggle("visible", aba === "faturas");
 
-  if (aba === "dashboard") {
-    dash.classList.add("visible");
-    tabDash.classList.add("active");
-  } else if (aba === "cadastro") {
-    cad.classList.add("visible");
-    tabCad.classList.add("active");
-  } else {
-    fat.classList.add("visible");
-    tabFat.classList.add("active");
-  }
+  tabDash.classList.toggle("active", aba === "dashboard");
+  tabCad.classList.toggle("active", aba === "cadastro");
+  tabFat.classList.toggle("active", aba === "faturas");
 }
 
 // ============ INIT ============
 
 document.addEventListener("DOMContentLoaded", () => {
-  // abas
   document.getElementById("tabDashboard").addEventListener("click", () =>
     ativarAba("dashboard")
   );
@@ -398,8 +389,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-  // inicia na aba dashboard
-  ativarAba("dashboard");
   carregarDashboard();
   carregarFaturas();
 });
