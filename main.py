@@ -59,7 +59,8 @@ class FaturaDB(Base):
     valor = Column(Numeric(10, 2))
     data_vencimento = Column(Date)
     status = Column(String, default="pendente")
-    responsavel = Column(String, nullable=True)
+    # IMPORTANTE: não colocar coluna "responsavel" aqui,
+    # porque ela NÃO existe no banco e estava causando erro.
     observacao = Column(String, nullable=True)
 
     anexos = relationship(
@@ -160,6 +161,20 @@ def get_responsavel(transportadora: str) -> Optional[str]:
     return RESP_MAP.get(base)
 
 
+# helper para transformar FaturaDB -> FaturaOut
+def fatura_to_out(f: FaturaDB) -> FaturaOut:
+    return FaturaOut(
+        id=f.id,
+        transportadora=f.transportadora,
+        numero_fatura=f.numero_fatura,
+        valor=float(f.valor or 0),
+        data_vencimento=f.data_vencimento,
+        status=f.status,
+        observacao=f.observacao,
+        responsavel=get_responsavel(f.transportadora),
+    )
+
+
 # =========================
 # DEPENDÊNCIA DO BANCO
 # =========================
@@ -179,7 +194,7 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 # /static -> arquivos estáticos (css/js)
@@ -207,11 +222,9 @@ def health_check():
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     """
-    Cria uma fatura. Se der erro de banco/validação, loga e devolve 400 em vez de 500 “genérico”.
+    Cria uma fatura.
     """
     try:
-        responsavel = get_responsavel(fatura.transportadora)
-
         db_fatura = FaturaDB(
             transportadora=fatura.transportadora,
             numero_fatura=fatura.numero_fatura,
@@ -219,14 +232,12 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
             data_vencimento=fatura.data_vencimento,
             status=fatura.status,
             observacao=fatura.observacao,
-            responsavel=responsavel,
         )
         db.add(db_fatura)
         db.commit()
         db.refresh(db_fatura)
-        return db_fatura
+        return fatura_to_out(db_fatura)
     except Exception as e:
-        # Isso aparece no log do Render
         print("ERRO AO CRIAR FATURA:", repr(e))
         raise HTTPException(status_code=400, detail="Erro ao criar fatura")
 
@@ -239,10 +250,7 @@ def listar_faturas(
     numero_fatura: Optional[str] = Query(None),
 ):
     """
-    Lista faturas com filtros opcionais:
-    - transportadora (contains)
-    - ate_vencimento (data_vencimento <= data)
-    - numero_fatura (contains)
+    Lista faturas com filtros opcionais.
     """
     query = db.query(FaturaDB)
 
@@ -254,14 +262,14 @@ def listar_faturas(
             filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
             query = query.filter(FaturaDB.data_vencimento <= filtro_data)
         except ValueError:
-            # se vier uma data zoada do front, ignora o filtro (não quebra a API)
             pass
 
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
     query = query.order_by(FaturaDB.id)
-    return query.all()
+    faturas_db = query.all()
+    return [fatura_to_out(f) for f in faturas_db]
 
 
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
@@ -269,7 +277,7 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
-    return fatura
+    return fatura_to_out(fatura)
 
 
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
@@ -287,13 +295,9 @@ def atualizar_fatura(
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
-    # Se mudar transportadora, recalcula responsável
-    if "transportadora" in data:
-        fatura.responsavel = get_responsavel(fatura.transportadora)
-
     db.commit()
     db.refresh(fatura)
-    return fatura
+    return fatura_to_out(fatura)
 
 
 @app.delete("/faturas/{fatura_id}")
@@ -484,7 +488,7 @@ def exportar_faturas(
             [
                 f.id,
                 f.transportadora,
-                f.responsavel or "",
+                get_responsavel(f.transportadora) or "",
                 str(f.numero_fatura),
                 float(f.valor or 0),
                 f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
