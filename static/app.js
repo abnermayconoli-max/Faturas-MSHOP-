@@ -35,8 +35,8 @@ async function carregarDashboard() {
 
     const url =
       params.toString().length > 0
-        ? ${API_BASE}/dashboard/resumo?${params.toString()}
-        : ${API_BASE}/dashboard/resumo;
+        ? `${API_BASE}/dashboard/resumo?${params.toString()}`
+        : `${API_BASE}/dashboard/resumo`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error("Erro ao buscar resumo");
@@ -74,8 +74,8 @@ async function carregarFaturas() {
 
     const url =
       params.toString().length > 0
-        ? ${API_BASE}/faturas?${params.toString()}
-        : ${API_BASE}/faturas;
+        ? `${API_BASE}/faturas?${params.toString()}`
+        : `${API_BASE}/faturas`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error("Erro ao listar faturas");
@@ -147,10 +147,10 @@ async function carregarFaturas() {
 }
 
 async function excluirFatura(id) {
-  if (!confirm(Excluir fatura ${id}?)) return;
+  if (!confirm(`Excluir fatura ${id}?`)) return;
 
   try {
-    const resp = await fetch(${API_BASE}/faturas/${id}, {
+    const resp = await fetch(`${API_BASE}/faturas/${id}`, {
       method: "DELETE",
     });
     if (!resp.ok) throw new Error("Erro ao excluir");
@@ -181,7 +181,7 @@ async function abrirModalAnexos(faturaId) {
   lista.innerHTML = "Carregando...";
 
   try {
-    const resp = await fetch(${API_BASE}/faturas/${faturaId}/anexos);
+    const resp = await fetch(`${API_BASE}/faturas/${faturaId}/anexos`);
     if (!resp.ok) throw new Error("Erro ao listar anexos");
     const anexos = await resp.json();
 
@@ -192,7 +192,7 @@ async function abrirModalAnexos(faturaId) {
       anexos.forEach((a) => {
         const li = document.createElement("li");
         const link = document.createElement("a");
-        link.href = ${API_BASE}/anexos/${a.id};
+        link.href = `${API_BASE}/anexos/${a.id}`;
         link.target = "_blank";
         link.textContent = a.original_name;
         li.appendChild(link);
@@ -227,13 +227,13 @@ async function salvarFatura(e) {
   try {
     let resp;
     if (editId) {
-      resp = await fetch(${API_BASE}/faturas/${editId}, {
+      resp = await fetch(`${API_BASE}/faturas/${editId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     } else {
-      resp = await fetch(${API_BASE}/faturas, {
+      resp = await fetch(`${API_BASE}/faturas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -250,7 +250,7 @@ async function salvarFatura(e) {
         fd.append("files", file);
       }
       const respAnexos = await fetch(
-        ${API_BASE}/faturas/${fatura.id}/anexos,
+        `${API_BASE}/faturas/${fatura.id}/anexos`,
         {
           method: "POST",
           body: fd,
