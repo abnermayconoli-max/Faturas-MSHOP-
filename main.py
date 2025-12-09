@@ -88,25 +88,10 @@ Base.metadata.create_all(bind=engine)
 
 
 # =========================
-# Pydantic
+# Pydantic (entradas / saídas)
 # =========================
-# IMPORTANTE:
-# Aqui está a mudança principal para evitar o erro ao listar faturas
-# que possuem campos nulos no banco.
-
 
 class FaturaBase(BaseModel):
-    # Para leitura, deixamos opcional para não quebrar se houver nulos no banco
-    transportadora: Optional[str] = None
-    numero_fatura: Optional[str] = None
-    valor: Optional[float] = None
-    data_vencimento: Optional[date] = None
-    status: Optional[str] = "pendente"
-    observacao: Optional[str] = None
-
-
-class FaturaCreate(BaseModel):
-    # Para criação, continuamos exigindo os campos obrigatórios
     transportadora: str
     numero_fatura: str
     valor: float
@@ -115,7 +100,13 @@ class FaturaCreate(BaseModel):
     observacao: Optional[str] = None
 
 
+class FaturaCreate(FaturaBase):
+    """Usado para criar fatura (campos obrigatórios)."""
+    pass
+
+
 class FaturaUpdate(BaseModel):
+    """Usado para atualizar (todos opcionais)."""
     transportadora: Optional[str] = None
     numero_fatura: Optional[str] = None
     valor: Optional[float] = None
@@ -132,8 +123,19 @@ class AnexoOut(BaseModel):
         orm_mode = True
 
 
-class FaturaOut(FaturaBase):
+class FaturaOut(BaseModel):
+    """
+    Modelo de saída.
+    Aqui eu deixo tudo como Optional para aceitar registros antigos
+    que possam ter campos nulos no banco (isso evita o erro 500).
+    """
     id: int
+    transportadora: Optional[str] = None
+    numero_fatura: Optional[str] = None
+    valor: Optional[float] = None
+    data_vencimento: Optional[date] = None
+    status: Optional[str] = None
+    observacao: Optional[str] = None
     responsavel: Optional[str] = None
 
     class Config:
@@ -235,13 +237,13 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
 def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),  # string vinda da URL
+    ate_vencimento: Optional[str] = Query(None),  # string, tratada abaixo
     numero_fatura: Optional[str] = Query(None),
 ):
     """
     Lista faturas com filtros opcionais:
     - transportadora (contains)
-    - ate_vencimento (data vencimento <=, se informado no formato AAAA-MM-DD)
+    - ate_vencimento (data vencimento <=, formato AAAA-MM-DD)
     - numero_fatura (contains)
     """
     query = db.query(FaturaDB)
@@ -387,12 +389,13 @@ def resumo_dashboard(
     transportadora: Optional[str] = Query(None),
 ):
     """
-    Se receber ?transportadora=DHL, calcula só daquela transportadora.
-    Sem parâmetro, calcula geral.
+    Se 'transportadora' for passado, calcula os valores só daquela
+    transportadora (para quando você clicar na lateral).
+    Se não, calcula geral.
     """
     hoje = date.today()
-    query = db.query(FaturaDB)
 
+    query = db.query(FaturaDB)
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
@@ -400,23 +403,25 @@ def resumo_dashboard(
         func.coalesce(func.sum(FaturaDB.valor), 0)
     ).scalar()
 
-    pendentes_val = (
-        query.session.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .filter(FaturaDB.status.ilike("pendente"))
-        .scalar()
-    )
+    pendentes_val = query.filter(
+        FaturaDB.status.ilike("pendente")
+    ).with_entities(
+        func.coalesce(func.sum(FaturaDB.valor), 0)
+    ).scalar()
 
-    atrasadas_val = (
-        query.session.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .filter(FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento < hoje)
-        .scalar()
-    )
+    atrasadas_val = query.filter(
+        FaturaDB.status.ilike("pendente"),
+        FaturaDB.data_vencimento < hoje,
+    ).with_entities(
+        func.coalesce(func.sum(FaturaDB.valor), 0)
+    ).scalar()
 
-    em_dia_val = (
-        query.session.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .filter(FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento >= hoje)
-        .scalar()
-    )
+    em_dia_val = query.filter(
+        FaturaDB.status.ilike("pendente"),
+        FaturaDB.data_vencimento >= hoje,
+    ).with_entities(
+        func.coalesce(func.sum(FaturaDB.valor), 0)
+    ).scalar()
 
     return {
         "total": float(total or 0),
@@ -468,7 +473,7 @@ def exportar_faturas(
                 f.id,
                 f.transportadora,
                 f.responsavel or "",
-                str(f.numero_fatura) if f.numero_fatura is not None else "",
+                str(f.numero_fatura),
                 float(f.valor or 0),
                 f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
                 f.status or "",
