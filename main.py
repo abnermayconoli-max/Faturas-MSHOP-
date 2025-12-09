@@ -10,6 +10,7 @@ from fastapi import (
     UploadFile,
     File,
     Query,
+    Body,
 )
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -87,7 +88,7 @@ class AnexoDB(Base):
 Base.metadata.create_all(bind=engine)
 
 # =========================
-# MODELOS Pydantic
+# MODELOS Pydantic (saída)
 # =========================
 
 class FaturaBase(BaseModel):
@@ -197,21 +198,49 @@ def health_check():
 # =========================
 
 @app.post("/faturas", response_model=FaturaOut)
-def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
+def criar_fatura(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
     """
-    Cria uma fatura. Foi colocado try/except para evitar erro 500 bruto.
-    Se o banco reclamar (ex: coluna, tipo, etc) devolve 400 com detalhe.
+    Criação de fatura lendo o body como dict (evita erro 400 de validação).
     """
     try:
-        responsavel = get_responsavel(fatura.transportadora)
+        transportadora = str(payload.get("transportadora", "")).strip()
+        numero_fatura = str(payload.get("numero_fatura", "")).strip()
+        valor_raw = payload.get("valor", 0)
+        try:
+            valor = float(valor_raw or 0)
+        except (TypeError, ValueError):
+            valor = 0.0
+
+        data_venc_raw = payload.get("data_vencimento")
+        if data_venc_raw:
+            try:
+                data_vencimento = datetime.strptime(data_venc_raw, "%Y-%m-%d").date()
+            except ValueError:
+                data_vencimento = date.today()
+        else:
+            data_vencimento = date.today()
+
+        status = (payload.get("status") or "pendente").strip()
+        observacao = payload.get("observacao")
+
+        if not transportadora or not numero_fatura:
+            raise HTTPException(
+                status_code=400,
+                detail="Transportadora e número da fatura são obrigatórios.",
+            )
+
+        responsavel = get_responsavel(transportadora)
 
         db_fatura = FaturaDB(
-            transportadora=fatura.transportadora,
-            numero_fatura=fatura.numero_fatura,
-            valor=fatura.valor,
-            data_vencimento=fatura.data_vencimento,
-            status=fatura.status,
-            observacao=fatura.observacao,
+            transportadora=transportadora,
+            numero_fatura=numero_fatura,
+            valor=valor,
+            data_vencimento=data_vencimento,
+            status=status,
+            observacao=observacao,
             responsavel=responsavel,
         )
         db.add(db_fatura)
@@ -219,26 +248,22 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
         db.refresh(db_fatura)
         return db_fatura
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        # log no console do Render
         print("ERRO AO CRIAR FATURA:", exc)
-        # devolve 400 pro front (aí o fetch não fica 500)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Erro ao criar fatura: {exc}",
-        )
+        raise HTTPException(status_code=500, detail="Erro interno ao criar fatura")
 
 
 @app.get("/faturas")
 def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),  # string vinda do input type="date"
+    ate_vencimento: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
     """
     Lista faturas com filtros opcionais.
-    Rota defensiva para não quebrar e não gerar 500.
     """
     try:
         query = db.query(FaturaDB)
@@ -251,7 +276,6 @@ def listar_faturas(
                 filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
                 query = query.filter(FaturaDB.data_vencimento <= filtro_data)
             except ValueError:
-                # Se vier data em formato estranho, ignora o filtro
                 pass
 
         if numero_fatura:
@@ -259,7 +283,6 @@ def listar_faturas(
 
         faturas_db: List[FaturaDB] = query.order_by(FaturaDB.id).all()
 
-        # Converte manualmente para dict para evitar problema de serialização
         resultado: List[dict[str, Any]] = []
         for f in faturas_db:
             resultado.append(
@@ -281,7 +304,6 @@ def listar_faturas(
 
     except Exception as exc:
         print("ERRO NA ROTA /faturas:", exc)
-        # devolve lista vazia em vez de 500 (o front só mostra “sem faturas”)
         return []
 
 
@@ -296,24 +318,50 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
 def atualizar_fatura(
     fatura_id: int,
-    dados: FaturaUpdate,
+    payload: dict = Body(...),
     db: Session = Depends(get_db),
 ):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    data = dados.dict(exclude_unset=True)
+    try:
+        if "transportadora" in payload:
+            fatura.transportadora = str(payload["transportadora"]).strip()
+            fatura.responsavel = get_responsavel(fatura.transportadora)
 
-    for campo, valor in data.items():
-        setattr(fatura, campo, valor)
+        if "numero_fatura" in payload:
+            fatura.numero_fatura = str(payload["numero_fatura"]).strip()
 
-    if "transportadora" in data:
-        fatura.responsavel = get_responsavel(fatura.transportadora)
+        if "valor" in payload:
+            try:
+                fatura.valor = float(payload["valor"] or 0)
+            except (TypeError, ValueError):
+                fatura.valor = 0.0
 
-    db.commit()
-    db.refresh(fatura)
-    return fatura
+        if "data_vencimento" in payload:
+            raw = payload["data_vencimento"]
+            if raw:
+                try:
+                    fatura.data_vencimento = datetime.strptime(
+                        raw, "%Y-%m-%d"
+                    ).date()
+                except ValueError:
+                    pass
+
+        if "status" in payload:
+            fatura.status = str(payload["status"])
+
+        if "observacao" in payload:
+            fatura.observacao = payload["observacao"]
+
+        db.commit()
+        db.refresh(fatura)
+        return fatura
+
+    except Exception as exc:
+        print("ERRO AO ATUALIZAR FATURA:", exc)
+        raise HTTPException(status_code=500, detail="Erro interno ao atualizar fatura")
 
 
 @app.delete("/faturas/{fatura_id}")
