@@ -190,7 +190,7 @@ function renderizarFaturas() {
         <td>${f.status}</td>
         <td>${f.observacao ?? ""}</td>
         <td class="acoes">
-          <button class="menu-btn">⋮</button>
+          <button type="button" class="menu-btn">⋮</button>
           <div class="menu-dropdown">
             <button data-acao="editar">Editar</button>
             <button data-acao="excluir">Excluir</button>
@@ -204,6 +204,7 @@ function renderizarFaturas() {
 
     menuBtn.addEventListener("click", (e) => {
       e.stopPropagation();
+      e.preventDefault(); // evita submit de form / side effects
       document
         .querySelectorAll(".menu-dropdown.ativo")
         .forEach((m) => m.classList.remove("ativo"));
