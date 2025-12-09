@@ -1,108 +1,123 @@
-/* =====================
-   ESTILO GLOBAL
-===================== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 body {
-  margin: 0;
-  font-family: "Inter", Arial, sans-serif;
-  background-color: #0f172a;
-  color: #f9fafb;
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #020617;
+  color: #e5e7eb;
 }
 
-h1, h2, h3 {
-  margin: 0;
-  font-weight: 600;
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
 }
 
-button {
-  font-family: inherit;
-}
-
-/* =====================
-   SIDEBAR
-===================== */
+/* ========== SIDEBAR ========== */
 
 .sidebar {
-  width: 280px;
-  background-color: #020617;
-  padding: 20px;
-  border-right: 1px solid #1e293b;
-  overflow-y: auto;
+  background: #020617;
+  border-right: 1px solid #1f2937;
+  padding: 24px 20px;
 }
 
-.sidebar h2 {
-  margin-top: 20px;
-  margin-bottom: 10px;
-  color: #38bdf8;
-  font-size: 16px;
+.logo {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 24px;
 }
 
-.transportadora-btn,
-#btnHome {
-  display: block;
+.sidebar-section {
+  margin-top: 24px;
+}
+
+.sidebar-section h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.sidebar-btn {
   width: 100%;
-  padding: 12px;
-  margin-bottom: 10px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
   text-align: left;
-  font-size: 15px;
-  border-radius: 10px;
-  background-color: #1e293b;
-  color: #f1f5f9;
-  border: none;
+  font-size: 14px;
   cursor: pointer;
-  transition: 0.2s;
+  margin-bottom: 8px;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
 }
 
-.transportadora-btn:hover,
-#btnHome:hover {
-  background-color: #334155;
+.sidebar-btn.primary {
+  background: #16a34a;
+  border-color: #16a34a;
+  text-align: center;
+}
+
+.sidebar-btn:hover {
+  background: #111827;
+  border-color: #374151;
+  transform: translateY(-1px);
+}
+
+.sidebar-btn.primary:hover {
+  background: #22c55e;
+  border-color: #22c55e;
 }
 
 .transportadora-btn.selected {
-  background-color: #16a34a !important;
+  border-color: #16a34a;
+  background: #022c22;
 }
 
-/* =====================
-   ÁREA PRINCIPAL
-===================== */
+/* date input sidebar */
+.sidebar input[type="date"] {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+/* ========== MAIN / TABS ========== */
 
 .main {
-  flex: 1;
-  padding: 20px;
-  overflow-y: auto;
+  padding: 24px 32px;
+  background: radial-gradient(circle at top left, #05132b, #020617 40%);
 }
-
-/* =====================
-   ABAS (Dashboard / Cadastro / Faturas)
-===================== */
 
 .tabs {
   display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 24px;
 }
 
-.tab-btn {
-  background: none;
-  border: none;
-  padding: 10px 20px;
-  font-size: 16px;
+.tab {
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9ca3af;
   cursor: pointer;
-  color: #94a3b8;
-  transition: 0.2s;
+  font-size: 14px;
 }
 
-.tab-btn.active {
-  color: #38bdf8;
-  border-bottom: 2px solid #38bdf8;
+.tab.active {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
 }
-
-/* =====================
-   SEÇÕES
-===================== */
 
 .section {
   display: none;
@@ -112,235 +127,311 @@ button {
   display: block;
 }
 
-/* =====================
-   CARDS DAS FATURAS
-===================== */
+.section > h2 {
+  font-size: 22px;
+  margin-bottom: 16px;
+}
 
-.cards-container {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
+/* ========== CARDS ========== */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.cards-small {
+  margin-top: 16px;
 }
 
 .card {
-  flex: 1;
-  background-color: #1e293b;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 16px;
   padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #334155;
+  border: 1px solid #1f2937;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
 }
 
-.card-title {
+.card h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.card p {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.card.mini {
+  padding: 14px 18px;
+}
+
+.card.mini p {
+  font-size: 18px;
+}
+
+/* ========== FORM CADASTRO ========== */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid #1f2937;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.form-group input,
+.form-group select {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 10px 14px;
   font-size: 14px;
-  color: #94a3b8;
 }
 
-.card-value {
-  margin-top: 10px;
-  font-size: 26px;
-  font-weight: bold;
+.form-group input[type="file"] {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #020617;
 }
 
-/* =====================
-   TABELA
-===================== */
-
-.table-container {
-  margin-top: 20px;
+.form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
-table {
+button.primary {
+  background: #16a34a;
+  border: 1px solid #16a34a;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button.primary:hover {
+  background: #22c55e;
+  border-color: #22c55e;
+}
+
+button.secondary {
+  border-radius: 999px;
+  padding: 9px 16px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+button.secondary:hover {
+  background: #111827;
+}
+
+/* ========== FILTROS FATURAS ========== */
+
+.filtros-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-group label {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+#buscaNumero {
+  min-width: 220px;
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 9px 14px;
+}
+
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range input[type="date"] {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 8px 12px;
+}
+
+.filtros-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ========== TABELA ========== */
+
+.table-section {
+  margin-top: 18px;
+}
+
+.table-section h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.tabela {
   width: 100%;
   border-collapse: collapse;
-  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.95);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
-thead {
-  background-color: #1e293b;
+.tabela thead {
+  background: #020617;
 }
 
-thead th {
-  padding: 12px;
+.tabela th,
+.tabela td {
+  padding: 10px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #111827;
+}
+
+.tabela th {
   text-align: left;
-  border-bottom: 1px solid #334155;
+  color: #9ca3af;
 }
 
-tbody tr {
-  border-bottom: 1px solid #1e293b;
+.tabela tbody tr:hover {
+  background: rgba(15, 23, 42, 0.85);
 }
 
-tbody tr:hover {
-  background-color: #1e293b;
-}
-
-td {
-  padding: 10px;
-}
-
-/* =====================
-   DROPDOWN DAS AÇÕES (⋮)
-===================== */
-
-td.acoes {
+/* coluna de ações */
+.tabela td.acoes {
   position: relative;
-  text-align: center;
   width: 80px;
-  overflow: visible;
 }
+
+/* ========== MENU 3 PONTINHOS ========== */
 
 .menu-btn {
+  border: none;
   background: transparent;
-  border: 1px solid #9ca3af;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
+  color: #e5e7eb;
+  font-size: 18px;
   cursor: pointer;
-  color: #f9fafb;
-  font-size: 20px;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.menu-btn:hover {
+  background: #111827;
 }
 
 .menu-dropdown {
   position: absolute;
-  top: 110%;
-  right: 0;
+  right: 4px;
+  top: 100%;
+  margin-top: 4px;
   background: #020617;
-  border: 1px solid #1f2937;
+  border: 1px solid #374151;
   border-radius: 10px;
-  padding: 5px 0;
+  padding: 4px 0;
+  min-width: 150px;
   display: none;
-  flex-direction: column;
-  min-width: 160px;
-  z-index: 9999;
+  z-index: 20;
+  box-shadow: 0 16px 35px rgba(0, 0, 0, 0.6);
+}
+
+.menu-dropdown.ativo {
+  display: block;
 }
 
 .menu-dropdown button {
-  background: transparent;
-  border: none;
-  color: #e5e7eb;
-  padding: 10px 14px;
-  text-align: left;
-  cursor: pointer;
   width: 100%;
-  font-size: 14px;
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .menu-dropdown button:hover {
   background: #111827;
 }
 
-.menu-dropdown.ativo {
-  display: flex;
-}
+/* ========== MODAL ANEXOS ========== */
 
-/* =====================
-   FORMULÁRIO DE CADASTRO
-===================== */
-
-form input,
-form select,
-form textarea {
-  width: 100%;
-  padding: 12px;
-  margin-bottom: 15px;
-  background-color: #1e293b;
-  color: #f1f5f9;
-  border: 1px solid #334155;
-  border-radius: 8px;
-}
-
-form button {
-  background-color: #16a34a;
-  color: white;
-  padding: 12px 20px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-form button:hover {
-  background-color: #15803d;
-}
-
-/* =====================
-   FILTROS DA ABA FATURAS
-===================== */
-
-.filters-row {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  margin-bottom: 15px;
-}
-
-.filters-row input {
-  width: 180px;
-}
-
-/* =====================
-   BOTÃO EXPORTAR EXCEL
-===================== */
-
-#btnExportarExcel {
-  background-color: #38bdf8;
-  border: none;
-  padding: 10px 18px;
-  border-radius: 8px;
-  cursor: pointer;
-  color: #0f172a;
-  font-weight: bold;
-}
-
-#btnExportarExcel:hover {
-  background-color: #0ea5e9;
-}
-
-/* =====================
-   MODAL DE ANEXOS
-===================== */
-
-#modalAnexos {
+.modal {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(15, 23, 42, 0.85);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
   display: none;
-  justify-content: center;
   align-items: center;
-  z-index: 99999;
+  justify-content: center;
+  z-index: 40;
 }
 
-#modalAnexos.open {
+.modal.open {
   display: flex;
 }
 
 .modal-content {
-  background: #1e293b;
-  padding: 20px;
-  border-radius: 12px;
-  width: 400px;
-  border: 1px solid #334155;
+  background: #020617;
+  border-radius: 14px;
+  padding: 20px 22px;
+  border: 1px solid #374151;
+  min-width: 320px;
+  max-width: 520px;
 }
 
-.modal-header {
-  display: flex;
-  justify-content: space-between;
+.modal-content h2 {
   margin-bottom: 10px;
 }
 
-.modal-header h3 {
-  color: #38bdf8;
-}
-
-#modalFechar {
-  cursor: pointer;
+.modal-close {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
   font-size: 20px;
-  color: #94a3b8;
+  float: right;
+  cursor: pointer;
 }
 
-#modalFechar:hover {
-  color: white;
+#listaAnexos {
+  list-style: none;
+  margin-top: 8px;
 }
 
 #listaAnexos li {
@@ -348,29 +439,10 @@ form button:hover {
 }
 
 #listaAnexos a {
-  color: #38bdf8;
+  color: #22c55e;
   text-decoration: none;
 }
 
 #listaAnexos a:hover {
   text-decoration: underline;
-}
-
-/* =====================
-   RESPONSIVIDADE
-===================== */
-
-@media (max-width: 900px) {
-  .cards-container {
-    flex-direction: column;
-  }
-
-  .filters-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .sidebar {
-    width: 220px;
-  }
 }
