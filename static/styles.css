@@ -312,7 +312,7 @@ button.secondary:hover {
   border-collapse: collapse;
   background: rgba(15, 23, 42, 0.95);
   border-radius: 14px;
-  overflow: hidden;
+  /* REMOVIDO overflow: hidden para não cortar o dropdown */
 }
 
 .tabela thead {
