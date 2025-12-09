@@ -28,6 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
+
 # =========================
 # CONFIG BANCO DE DADOS
 # =========================
@@ -44,6 +45,7 @@ Base = declarative_base()
 # Pasta para anexos
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
+
 
 # =========================
 # MODELO SQLALCHEMY
@@ -88,25 +90,30 @@ Base.metadata.create_all(bind=engine)
 
 
 # =========================
-# Pydantic (entradas / saídas)
+# Pydantic
 # =========================
+# Aqui está a principal mudança:
+# - FaturaBase usa campos opcionais (para não quebrar com registros antigos nulos)
+# - FaturaCreate exige os campos obrigatórios no cadastro
+
 
 class FaturaBase(BaseModel):
-    transportadora: str
-    numero_fatura: str
-    valor: float
-    data_vencimento: date
-    status: str = "pendente"
+    transportadora: Optional[str] = None
+    numero_fatura: Optional[str] = None
+    valor: Optional[float] = None
+    data_vencimento: Optional[date] = None
+    status: Optional[str] = "pendente"
     observacao: Optional[str] = None
 
 
 class FaturaCreate(FaturaBase):
-    """Usado para criar fatura (campos obrigatórios)."""
-    pass
+    transportadora: str
+    numero_fatura: str
+    valor: float
+    data_vencimento: date
 
 
 class FaturaUpdate(BaseModel):
-    """Usado para atualizar (todos opcionais)."""
     transportadora: Optional[str] = None
     numero_fatura: Optional[str] = None
     valor: Optional[float] = None
@@ -123,19 +130,8 @@ class AnexoOut(BaseModel):
         orm_mode = True
 
 
-class FaturaOut(BaseModel):
-    """
-    Modelo de saída.
-    Aqui eu deixo tudo como Optional para aceitar registros antigos
-    que possam ter campos nulos no banco (isso evita o erro 500).
-    """
+class FaturaOut(FaturaBase):
     id: int
-    transportadora: Optional[str] = None
-    numero_fatura: Optional[str] = None
-    valor: Optional[float] = None
-    data_vencimento: Optional[date] = None
-    status: Optional[str] = None
-    observacao: Optional[str] = None
     responsavel: Optional[str] = None
 
     class Config:
@@ -223,7 +219,7 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
         numero_fatura=fatura.numero_fatura,
         valor=fatura.valor,
         data_vencimento=fatura.data_vencimento,
-        status=fatura.status,
+        status=fatura.status or "pendente",
         observacao=fatura.observacao,
         responsavel=responsavel,
     )
@@ -237,13 +233,13 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
 def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),  # string, tratada abaixo
+    ate_vencimento: Optional[str] = Query(None),  # STRING para evitar erro 422
     numero_fatura: Optional[str] = Query(None),
 ):
     """
     Lista faturas com filtros opcionais:
     - transportadora (contains)
-    - ate_vencimento (data vencimento <=, formato AAAA-MM-DD)
+    - ate_vencimento (data vencimento <=, se informado no formato AAAA-MM-DD)
     - numero_fatura (contains)
     """
     query = db.query(FaturaDB)
@@ -251,13 +247,13 @@ def listar_faturas(
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
-    # trata a data manualmente para evitar erro 422
+    # trata a data manualmente para evitar erro 422 em caso de valor vazio/estranho
     if ate_vencimento:
         try:
             filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
             query = query.filter(FaturaDB.data_vencimento <= filtro_data)
         except ValueError:
-            # se a data vier em formato estranho, simplesmente ignora o filtro
+            # se a data vier em formato inesperado, ignora o filtro
             pass
 
     if numero_fatura:
@@ -389,42 +385,47 @@ def resumo_dashboard(
     transportadora: Optional[str] = Query(None),
 ):
     """
-    Se 'transportadora' for passado, calcula os valores só daquela
-    transportadora (para quando você clicar na lateral).
-    Se não, calcula geral.
+    Se receber ?transportadora=DHL, calcula os valores só daquela transportadora.
+    Se não receber, calcula geral.
     """
     hoje = date.today()
-
     query = db.query(FaturaDB)
+
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
-    total = query.with_entities(
-        func.coalesce(func.sum(FaturaDB.valor), 0)
-    ).scalar()
-
-    pendentes_val = query.filter(
+    total = db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
+    pendentes_q = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).filter(
         FaturaDB.status.ilike("pendente")
-    ).with_entities(
-        func.coalesce(func.sum(FaturaDB.valor), 0)
-    ).scalar()
-
-    atrasadas_val = query.filter(
+    )
+    atrasadas_q = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).filter(
         FaturaDB.status.ilike("pendente"),
         FaturaDB.data_vencimento < hoje,
-    ).with_entities(
-        func.coalesce(func.sum(FaturaDB.valor), 0)
-    ).scalar()
-
-    em_dia_val = query.filter(
+    )
+    em_dia_q = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).filter(
         FaturaDB.status.ilike("pendente"),
         FaturaDB.data_vencimento >= hoje,
-    ).with_entities(
-        func.coalesce(func.sum(FaturaDB.valor), 0)
-    ).scalar()
+    )
+
+    if transportadora:
+        total = total.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
+        pendentes_q = pendentes_q.filter(
+            FaturaDB.transportadora.ilike(f"%{transportadora}%")
+        )
+        atrasadas_q = atrasadas_q.filter(
+            FaturaDB.transportadora.ilike(f"%{transportadora}%")
+        )
+        em_dia_q = em_dia_q.filter(
+            FaturaDB.transportadora.ilike(f"%{transportadora}%")
+        )
+
+    total_val = total.scalar()
+    pendentes_val = pendentes_q.scalar()
+    atrasadas_val = atrasadas_q.scalar()
+    em_dia_val = em_dia_q.scalar()
 
     return {
-        "total": float(total or 0),
+        "total": float(total_val or 0),
         "pendentes": float(pendentes_val or 0),
         "atrasadas": float(atrasadas_val or 0),
         "em_dia": float(em_dia_val or 0),
@@ -473,7 +474,7 @@ def exportar_faturas(
                 f.id,
                 f.transportadora,
                 f.responsavel or "",
-                str(f.numero_fatura),
+                str(f.numero_fatura or ""),
                 float(f.valor or 0),
                 f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
                 f.status or "",
