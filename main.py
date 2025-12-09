@@ -88,7 +88,7 @@ Base.metadata.create_all(bind=engine)
 
 
 # =========================
-# Pydantic
+# Pydantic (usado em criação/edição)
 # =========================
 
 class FaturaBase(BaseModel):
@@ -96,7 +96,7 @@ class FaturaBase(BaseModel):
     numero_fatura: str
     valor: float
     data_vencimento: date
-    status: str = "pendente"
+    status: Optional[str] = "pendente"
     observacao: Optional[str] = None
 
 
@@ -210,7 +210,7 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
         numero_fatura=fatura.numero_fatura,
         valor=fatura.valor,
         data_vencimento=fatura.data_vencimento,
-        status=fatura.status,
+        status=fatura.status or "pendente",
         observacao=fatura.observacao,
         responsavel=responsavel,
     )
@@ -220,17 +220,19 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     return db_fatura
 
 
-@app.get("/faturas", response_model=List[FaturaOut])
+# <<< ENDPOINT CRÍTICO QUE ESTAVA DANDO ERRO >>>
+# removi response_model e converto tudo manualmente para tipos simples
+@app.get("/faturas")
 def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),  # string, tratada manualmente
+    ate_vencimento: Optional[str] = Query(None),  # string vinda da URL (AAAA-MM-DD)
     numero_fatura: Optional[str] = Query(None),
 ):
     """
     Lista faturas com filtros opcionais:
     - transportadora (contains)
-    - ate_vencimento (data vencimento <=, se informado no formato AAAA-MM-DD)
+    - ate_vencimento (data_vencimento <=, formato AAAA-MM-DD)
     - numero_fatura (contains)
     """
     query = db.query(FaturaDB)
@@ -238,20 +240,39 @@ def listar_faturas(
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
-    # trata a data manualmente para evitar erro 422
     if ate_vencimento:
         try:
             filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
             query = query.filter(FaturaDB.data_vencimento <= filtro_data)
         except ValueError:
-            # se a data vier em formato estranho, simplesmente ignora o filtro
+            # Se vier data em formato estranho, simplesmente ignora o filtro
             pass
 
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
-    query = query.order_by(FaturaDB.id)
-    return query.all()
+    faturas = query.order_by(FaturaDB.id).all()
+
+    # Monta resposta "na mão" pra evitar qualquer problema de validação/serialização
+    resultado = []
+    for f in faturas:
+        resultado.append(
+            {
+                "id": f.id,
+                "transportadora": f.transportadora,
+                "numero_fatura": f.numero_fatura,
+                "valor": float(f.valor or 0),
+                "data_vencimento": (
+                    f.data_vencimento.isoformat() if f.data_vencimento else None
+                ),
+                "status": f.status or "pendente",
+                "observacao": f.observacao,
+                "responsavel": f.responsavel,
+            }
+        )
+
+    return resultado
+# <<< FIM DO ENDPOINT AJUSTADO >>>
 
 
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
@@ -370,42 +391,42 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
 # DASHBOARD / EXPORT
 # =========================
 
+# Agora aceita filtro opcional de transportadora
 @app.get("/dashboard/resumo")
 def resumo_dashboard(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
 ):
-    """
-    Retorna resumo para o dashboard.
-    Se 'transportadora' for informado, calcula só daquela transportadora.
-    """
     hoje = date.today()
 
-    def soma(extra_filters=None):
-        if extra_filters is None:
-            extra_filters = []
-
-        q = db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
-        if transportadora:
-            q = q.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-        for f in extra_filters:
-            q = q.filter(f)
-        return float(q.scalar() or 0)
-
-    total = soma()
-    pendentes_val = soma([FaturaDB.status.ilike("pendente")])
-    atrasadas_val = soma(
-        [FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento < hoje]
+    query_total = db.query(func.coalesce(func.sum(FaturaDB.valor), 0))
+    query_pend = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).filter(
+        FaturaDB.status.ilike("pendente")
     )
-    em_dia_val = soma(
-        [FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento >= hoje]
+    query_atras = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).filter(
+        FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento < hoje
     )
+    query_em_dia = db.query(func.coalesce(func.sum(FaturaDB.valor), 0)).filter(
+        FaturaDB.status.ilike("pendente"), FaturaDB.data_vencimento >= hoje
+    )
+
+    if transportadora:
+        like = f"%{transportadora}%"
+        query_total = query_total.filter(FaturaDB.transportadora.ilike(like))
+        query_pend = query_pend.filter(FaturaDB.transportadora.ilike(like))
+        query_atras = query_atras.filter(FaturaDB.transportadora.ilike(like))
+        query_em_dia = query_em_dia.filter(FaturaDB.transportadora.ilike(like))
+
+    total = query_total.scalar()
+    pendentes_val = query_pend.scalar()
+    atrasadas_val = query_atras.scalar()
+    em_dia_val = query_em_dia.scalar()
 
     return {
-        "total": total,
-        "pendentes": pendentes_val,
-        "atrasadas": atrasadas_val,
-        "em_dia": em_dia_val,
+        "total": float(total or 0),
+        "pendentes": float(pendentes_val or 0),
+        "atrasadas": float(atrasadas_val or 0),
+        "em_dia": float(em_dia_val or 0),
     }
 
 
