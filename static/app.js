@@ -1,16 +1,24 @@
 // URL base (vazio = mesmo domínio)
 const API_BASE = "";
 
-// Estado de filtros
+// Estado de filtros globais
 let filtroTransportadora = "";
 let filtroVencimento = "";
 let filtroNumeroFatura = "";
+
+// Filtros só da aba Faturas
+let filtroDataInicioFaturas = "";
+let filtroDataFimFaturas = "";
+
+// Cache da última lista vinda da API
+let ultimaListaFaturas = [];
 
 // ============ HELPERS ============
 
 function formatCurrency(valor) {
   if (valor === null || valor === undefined) return "R$ 0,00";
-  return Number(valor).toLocaleString("pt-BR", {
+  const n = Number(valor) || 0;
+  return n.toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
     minimumFractionDigits: 2,
@@ -32,6 +40,9 @@ async function carregarDashboard() {
     if (filtroTransportadora) {
       params.append("transportadora", filtroTransportadora);
     }
+    if (filtroVencimento) {
+      params.append("ate_vencimento", filtroVencimento);
+    }
 
     const url =
       params.toString().length > 0
@@ -50,14 +61,16 @@ async function carregarDashboard() {
     document.getElementById("cardAtrasadas").textContent = formatCurrency(
       data.atrasadas
     );
-    document.getElementById("cardEmDia").textContent = formatCurrency(data.em_dia);
+    document.getElementById("cardEmDia").textContent = formatCurrency(
+      data.em_dia
+    );
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar dashboard");
   }
 }
 
-// ============ FATURAS ============
+// ============ FATURAS (LISTA + RESUMO) ============
 
 async function carregarFaturas() {
   try {
@@ -81,13 +94,93 @@ async function carregarFaturas() {
     if (!resp.ok) throw new Error("Erro ao listar faturas");
 
     const faturas = await resp.json();
-    const tbody = document.getElementById("tbodyFaturas");
-    tbody.innerHTML = "";
+    ultimaListaFaturas = faturas;
+    renderizarFaturas();
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar faturas");
+  }
+}
 
-    faturas.forEach((f) => {
-      const tr = document.createElement("tr");
+function renderizarFaturas() {
+  const tbody = document.getElementById("tbodyFaturas");
+  tbody.innerHTML = "";
 
-      tr.innerHTML = `
+  let lista = Array.isArray(ultimaListaFaturas)
+    ? [...ultimaListaFaturas]
+    : [];
+
+  // Filtro por período só da aba Faturas
+  if (filtroDataInicioFaturas || filtroDataFimFaturas) {
+    lista = lista.filter((f) => {
+      if (!f.data_vencimento) return false;
+      const d = new Date(f.data_vencimento);
+      const time = d.setHours(0, 0, 0, 0);
+
+      if (filtroDataInicioFaturas) {
+        const ini = new Date(filtroDataInicioFaturas).setHours(0, 0, 0, 0);
+        if (time < ini) return false;
+      }
+      if (filtroDataFimFaturas) {
+        const fim = new Date(filtroDataFimFaturas).setHours(0, 0, 0, 0);
+        if (time > fim) return false;
+      }
+      return true;
+    });
+  }
+
+  // RESUMO DA ABA FATURAS
+  let total = 0;
+  let pendentes = 0;
+  let atrasadas = 0;
+  let pagas = 0;
+  const hoje = new Date().setHours(0, 0, 0, 0);
+
+  lista.forEach((f) => {
+    const valor = Number(f.valor || 0);
+    total += valor;
+
+    const status = (f.status || "").toLowerCase();
+    const venc =
+      f.data_vencimento && !Number.isNaN(new Date(f.data_vencimento))
+        ? new Date(f.data_vencimento).setHours(0, 0, 0, 0)
+        : null;
+
+    if (status === "pago") {
+      pagas += valor;
+    } else if (status === "pendente") {
+      if (venc !== null && venc < hoje) {
+        atrasadas += valor;
+      } else {
+        pendentes += valor;
+      }
+    } else if (status === "atrasado") {
+      atrasadas += valor;
+    }
+  });
+
+  document.getElementById("fatTotal").textContent = formatCurrency(total);
+  document.getElementById("fatPendentes").textContent = formatCurrency(pendentes);
+  document.getElementById("fatAtrasadas").textContent = formatCurrency(atrasadas);
+  document.getElementById("fatPagas").textContent = formatCurrency(pagas);
+
+  // TABELA
+  if (lista.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 9;
+    td.textContent = "Nenhuma fatura encontrada.";
+    td.style.textAlign = "center";
+    td.style.padding = "12px";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  lista.forEach((f) => {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
         <td>${f.id}</td>
         <td>${f.transportadora}</td>
         <td>${f.responsavel ?? ""}</td>
@@ -106,46 +199,42 @@ async function carregarFaturas() {
         </td>
       `;
 
-      const menuBtn = tr.querySelector(".menu-btn");
-      const dropdown = tr.querySelector(".menu-dropdown");
+    const menuBtn = tr.querySelector(".menu-btn");
+    const dropdown = tr.querySelector(".menu-dropdown");
 
-      menuBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        document
-          .querySelectorAll(".menu-dropdown.ativo")
-          .forEach((m) => m.classList.remove("ativo"));
-        dropdown.classList.toggle("ativo");
-      });
-
-      dropdown.addEventListener("click", async (e) => {
-        const acao = e.target.dataset.acao;
-        if (!acao) return;
-
-        if (acao === "excluir") {
-          await excluirFatura(f.id);
-        } else if (acao === "editar") {
-          preencherFormularioEdicao(f);
-          ativarAba("cadastro");
-        } else if (acao === "anexos") {
-          abrirModalAnexos(f.id);
-        }
-
-        dropdown.classList.remove("ativo");
-      });
-
-      tbody.appendChild(tr);
-    });
-
-    document.addEventListener("click", () => {
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
       document
         .querySelectorAll(".menu-dropdown.ativo")
         .forEach((m) => m.classList.remove("ativo"));
+      dropdown.classList.toggle("ativo");
     });
-  } catch (err) {
-    console.error(err);
-    alert("Erro ao carregar faturas");
-  }
+
+    dropdown.addEventListener("click", async (e) => {
+      const acao = e.target.dataset.acao;
+      if (!acao) return;
+
+      if (acao === "excluir") {
+        await excluirFatura(f.id);
+      } else if (acao === "editar") {
+        preencherFormularioEdicao(f);
+      } else if (acao === "anexos") {
+        abrirModalAnexos(f.id);
+      }
+
+      dropdown.classList.remove("ativo");
+    });
+
+    tbody.appendChild(tr);
+  });
 }
+
+// Fechar menus se clicar fora
+document.addEventListener("click", () => {
+  document
+    .querySelectorAll(".menu-dropdown.ativo")
+    .forEach((m) => m.classList.remove("ativo"));
+});
 
 async function excluirFatura(id) {
   if (!confirm(`Excluir fatura ${id}?`)) return;
@@ -164,6 +253,8 @@ async function excluirFatura(id) {
 }
 
 function preencherFormularioEdicao(f) {
+  // Vai pra aba Cadastro já com os dados
+  ativarAba("cadastro");
   document.getElementById("inputTransportadora").value = f.transportadora;
   document.getElementById("inputNumeroFatura").value = f.numero_fatura;
   document.getElementById("inputValor").value = f.valor;
@@ -242,12 +333,13 @@ async function salvarFatura(e) {
     }
 
     if (!resp.ok) {
-      console.error("Status ao salvar:", resp.status);
+      console.log("Status ao salvar:", resp.status);
       throw new Error("Erro ao salvar fatura");
     }
 
     const fatura = await resp.json();
 
+    // Envio de anexos (se tiver)
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos.files.length > 0) {
       const fd = new FormData();
@@ -283,23 +375,48 @@ function ativarAba(aba) {
   const dash = document.getElementById("dashboardSection");
   const cad = document.getElementById("cadastroSection");
   const fat = document.getElementById("faturasSection");
-
   const tabDash = document.getElementById("tabDashboard");
   const tabCad = document.getElementById("tabCadastro");
   const tabFat = document.getElementById("tabFaturas");
 
-  dash.classList.toggle("visible", aba === "dashboard");
-  cad.classList.toggle("visible", aba === "cadastro");
-  fat.classList.toggle("visible", aba === "faturas");
+  [dash, cad, fat].forEach((s) => s.classList.remove("visible"));
+  [tabDash, tabCad, tabFat].forEach((t) => t.classList.remove("active"));
 
-  tabDash.classList.toggle("active", aba === "dashboard");
-  tabCad.classList.toggle("active", aba === "cadastro");
-  tabFat.classList.toggle("active", aba === "faturas");
+  if (aba === "dashboard") {
+    dash.classList.add("visible");
+    tabDash.classList.add("active");
+  } else if (aba === "cadastro") {
+    cad.classList.add("visible");
+    tabCad.classList.add("active");
+  } else {
+    fat.classList.add("visible");
+    tabFat.classList.add("active");
+  }
+}
+
+// ============ EXPORTAR EXCEL (CSV) ============
+
+function exportarExcel() {
+  const params = new URLSearchParams();
+  if (filtroTransportadora) {
+    params.append("transportadora", filtroTransportadora);
+  }
+  if (filtroNumeroFatura) {
+    params.append("numero_fatura", filtroNumeroFatura);
+  }
+
+  const url =
+    params.toString().length > 0
+      ? `${API_BASE}/faturas/exportar?${params.toString()}`
+      : `${API_BASE}/faturas/exportar`;
+
+  window.open(url, "_blank");
 }
 
 // ============ INIT ============
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Abas
   document.getElementById("tabDashboard").addEventListener("click", () =>
     ativarAba("dashboard")
   );
@@ -310,6 +427,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ativarAba("faturas")
   );
 
+  // Botão página inicial
   document.getElementById("btnHome").addEventListener("click", () => {
     filtroTransportadora = "";
     filtroVencimento = "";
@@ -318,12 +436,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (filtroVencInput) filtroVencInput.value = "";
     const buscaNumero = document.getElementById("buscaNumero");
     if (buscaNumero) buscaNumero.value = "";
-
+    document
+      .querySelectorAll(".transportadora-btn")
+      .forEach((b) => b.classList.remove("selected"));
     ativarAba("dashboard");
     carregarDashboard();
     carregarFaturas();
   });
 
+  // Transportadoras sidebar
   document.querySelectorAll(".transportadora-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       filtroTransportadora = btn.dataset.transportadora || "";
@@ -331,18 +452,18 @@ document.addEventListener("DOMContentLoaded", () => {
         .querySelectorAll(".transportadora-btn")
         .forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
-      ativarAba("faturas");
-      carregarFaturas();
       carregarDashboard();
+      carregarFaturas();
     })
   );
 
+  // Filtro por vencimento sidebar
   const filtroVencInput = document.getElementById("filtroVencimento");
   if (filtroVencInput) {
     filtroVencInput.addEventListener("change", (e) => {
       filtroVencimento = e.target.value;
-      carregarFaturas();
       carregarDashboard();
+      carregarFaturas();
     });
   }
 
@@ -354,11 +475,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (filtroVencInput) filtroVencInput.value = "";
       const buscaNumero = document.getElementById("buscaNumero");
       if (buscaNumero) buscaNumero.value = "";
-      carregarFaturas();
       carregarDashboard();
+      carregarFaturas();
     });
   }
 
+  // Busca nº fatura
   const buscaNumero = document.getElementById("buscaNumero");
   if (buscaNumero) {
     buscaNumero.addEventListener("input", (e) => {
@@ -367,28 +489,53 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  const btnAtualizar = document.getElementById("btnAtualizarFaturas");
-  if (btnAtualizar) {
-    btnAtualizar.addEventListener("click", carregarFaturas);
+  // Filtro por período da aba Faturas
+  const ini = document.getElementById("filtroDataInicioFaturas");
+  const fim = document.getElementById("filtroDataFimFaturas");
+  if (ini) {
+    ini.addEventListener("change", (e) => {
+      filtroDataInicioFaturas = e.target.value;
+      renderizarFaturas();
+    });
+  }
+  if (fim) {
+    fim.addEventListener("change", (e) => {
+      filtroDataFimFaturas = e.target.value;
+      renderizarFaturas();
+    });
   }
 
-  document
-    .getElementById("formFatura")
-    .addEventListener("submit", salvarFatura);
+  // Atualizar lista manualmente
+  const btnAtualizar = document.getElementById("btnAtualizarFaturas");
+  if (btnAtualizar) {
+    btnAtualizar.addEventListener("click", (e) => {
+      e.preventDefault();
+      carregarFaturas();
+    });
+  }
 
+  // Exportar Excel
+  const btnExportar = document.getElementById("btnExportarExcel");
+  if (btnExportar) {
+    btnExportar.addEventListener("click", exportarExcel);
+  }
+
+  // Formulário
+  document.getElementById("formFatura").addEventListener("submit", salvarFatura);
+
+  // Modal anexos
   document
     .getElementById("modalFechar")
     .addEventListener("click", () =>
       document.getElementById("modalAnexos").classList.remove("open")
     );
-  document
-    .getElementById("modalAnexos")
-    .addEventListener("click", (e) => {
-      if (e.target.id === "modalAnexos") {
-        document.getElementById("modalAnexos").classList.remove("open");
-      }
-    });
+  document.getElementById("modalAnexos").addEventListener("click", (e) => {
+    if (e.target.id === "modalAnexos") {
+      document.getElementById("modalAnexos").classList.remove("open");
+    }
+  });
 
+  // Primeira carga
   carregarDashboard();
   carregarFaturas();
 });
