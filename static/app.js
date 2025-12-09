@@ -15,6 +15,7 @@ let ultimaListaFaturas = [];
 
 // ============ HELPERS ============
 
+// Converte número em moeda BR
 function formatCurrency(valor) {
   if (valor === null || valor === undefined) return "R$ 0,00";
   const n = Number(valor) || 0;
@@ -25,8 +26,30 @@ function formatCurrency(valor) {
   });
 }
 
+// Parse de data YYYY-MM-DD como data LOCAL (sem problema de fuso)
+function parseISODateLocal(isoDate) {
+  if (!isoDate) return null;
+
+  // Formato só data: 2025-12-17
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    const [y, m, d] = isoDate.split("-").map(Number);
+    return new Date(y, m - 1, d); // ano, mês-1, dia (data local)
+  }
+
+  const d = new Date(isoDate);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// Formata data para dd/mm/aaaa sem perder 1 dia
 function formatDate(isoDate) {
   if (!isoDate) return "";
+
+  // Se vier só YYYY-MM-DD, monta manualmente
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    const [y, m, d] = isoDate.split("-");
+    return `${d}/${m}/${y}`;
+  }
+
   const d = new Date(isoDate);
   if (Number.isNaN(d.getTime())) return isoDate;
   return d.toLocaleDateString("pt-BR");
@@ -114,15 +137,21 @@ function renderizarFaturas() {
   if (filtroDataInicioFaturas || filtroDataFimFaturas) {
     lista = lista.filter((f) => {
       if (!f.data_vencimento) return false;
-      const d = new Date(f.data_vencimento);
+
+      const d = parseISODateLocal(f.data_vencimento);
+      if (!d) return false;
       const time = d.setHours(0, 0, 0, 0);
 
       if (filtroDataInicioFaturas) {
-        const ini = new Date(filtroDataInicioFaturas).setHours(0, 0, 0, 0);
+        const dIni = parseISODateLocal(filtroDataInicioFaturas);
+        if (!dIni) return false;
+        const ini = dIni.setHours(0, 0, 0, 0);
         if (time < ini) return false;
       }
       if (filtroDataFimFaturas) {
-        const fim = new Date(filtroDataFimFaturas).setHours(0, 0, 0, 0);
+        const dFim = parseISODateLocal(filtroDataFimFaturas);
+        if (!dFim) return false;
+        const fim = dFim.setHours(0, 0, 0, 0);
         if (time > fim) return false;
       }
       return true;
@@ -134,22 +163,27 @@ function renderizarFaturas() {
   let pendentes = 0;
   let atrasadas = 0;
   let pagas = 0;
-  const hoje = new Date().setHours(0, 0, 0, 0);
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const hojeTime = hoje.getTime();
 
   lista.forEach((f) => {
     const valor = Number(f.valor || 0);
     total += valor;
 
     const status = (f.status || "").toLowerCase();
-    const venc =
-      f.data_vencimento && !Number.isNaN(new Date(f.data_vencimento))
-        ? new Date(f.data_vencimento).setHours(0, 0, 0, 0)
+
+    const dVenc = parseISODateLocal(f.data_vencimento);
+    const vencTime =
+      dVenc && !Number.isNaN(dVenc.getTime())
+        ? dVenc.setHours(0, 0, 0, 0)
         : null;
 
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
-      if (venc !== null && venc < hoje) {
+      if (vencTime !== null && vencTime < hojeTime) {
         atrasadas += valor;
       } else {
         pendentes += valor;
@@ -204,7 +238,7 @@ function renderizarFaturas() {
 
     menuBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      e.preventDefault(); // evita submit de form / side effects
+      e.preventDefault();
       document
         .querySelectorAll(".menu-dropdown.ativo")
         .forEach((m) => m.classList.remove("ativo"));
