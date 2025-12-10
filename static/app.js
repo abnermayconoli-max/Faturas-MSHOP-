@@ -59,9 +59,8 @@ function formatDate(isoDate) {
 // ============ DASHBOARD ============
 
 // Agora o dashboard usa o mesmo resumo calculado em renderizarFaturas.
-// Mantemos a função só para compatibilidade com os lugares que chamam.
 async function carregarDashboard() {
-  // não faz nada específico; o resumo é atualizado em renderizarFaturas()
+  // Nada específico: o resumo é atualizado em renderizarFaturas()
 }
 
 // ============ FATURAS (LISTA + RESUMO) ============
@@ -89,7 +88,7 @@ async function carregarFaturas() {
 
     const faturas = await resp.json();
     ultimaListaFaturas = faturas;
-    renderizarFaturas(); // aqui atualiza tabela, cards da aba Faturas e Dashboard
+    renderizarFaturas(); // atualiza tabela + cards + dashboard
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar faturas");
@@ -129,7 +128,7 @@ function renderizarFaturas() {
     });
   }
 
-  // ------- Filtro por STATUS (aba Faturas + Dashboard) -------
+  // ------- Filtro por STATUS -------
   if (filtroStatus) {
     lista = lista.filter((f) => {
       const st = (f.status || "").toLowerCase();
@@ -171,13 +170,13 @@ function renderizarFaturas() {
     }
   });
 
-  // ----- Atualiza cards da ABA FATURAS -----
+  // ----- Cards da aba FATURAS -----
   document.getElementById("fatTotal").textContent = formatCurrency(total);
   document.getElementById("fatPendentes").textContent = formatCurrency(pendentes);
   document.getElementById("fatAtrasadas").textContent = formatCurrency(atrasadas);
   document.getElementById("fatPagas").textContent = formatCurrency(pagas);
 
-  // ----- Atualiza cards do DASHBOARD com o MESMO resumo -----
+  // ----- Cards do DASHBOARD (mesmos valores) -----
   try {
     const cardTotal = document.getElementById("cardTotal");
     const cardPendentes = document.getElementById("cardPendentes");
@@ -189,7 +188,6 @@ function renderizarFaturas() {
       cardPendentes.textContent = formatCurrency(pendentes);
       cardAtrasadas.textContent = formatCurrency(atrasadas);
 
-      // Em dia = total - atrasadas (pagas + pendentes em dia)
       const emDia = total - atrasadas;
       cardEmDia.textContent = formatCurrency(emDia);
     }
@@ -311,17 +309,41 @@ async function abrirModalAnexos(faturaId) {
     if (!resp.ok) throw new Error("Erro ao listar anexos");
     const anexos = await resp.json();
 
-    if (anexos.length === 0) {
+    if (!Array.isArray(anexos) || anexos.length === 0) {
       lista.innerHTML = "<li>Sem anexos.</li>";
     } else {
       lista.innerHTML = "";
       anexos.forEach((a) => {
         const li = document.createElement("li");
+
         const link = document.createElement("a");
         link.href = `${API_BASE}/anexos/${a.id}`;
         link.target = "_blank";
-        link.textContent = a.original_name;
+        link.textContent = a.original_name || `Anexo ${a.id}`;
+
+        const btnDel = document.createElement("button");
+        btnDel.textContent = "Excluir";
+        btnDel.classList.add("btn-excluir-anexo");
+
+        btnDel.addEventListener("click", async () => {
+          if (!confirm(`Excluir anexo "${a.original_name}"?`)) return;
+          try {
+            const respDel = await fetch(`${API_BASE}/anexos/${a.id}`, {
+              method: "DELETE",
+            });
+            if (!respDel.ok) {
+              throw new Error("Erro ao excluir anexo");
+            }
+            // Recarrega lista após excluir
+            await abrirModalAnexos(faturaId);
+          } catch (err) {
+            console.error(err);
+            alert("Erro ao excluir anexo");
+          }
+        });
+
         li.appendChild(link);
+        li.appendChild(btnDel);
         lista.appendChild(li);
       });
     }
@@ -489,7 +511,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .forEach((b) => b.classList.remove("selected"));
 
     ativarAba("dashboard");
-    carregarFaturas(); // isso já atualiza o dashboard também
+    carregarFaturas();
   });
 
   // Transportadoras sidebar
@@ -563,12 +585,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Filtro por STATUS (novo)
+  // Filtro por STATUS
   const statusSelect = document.getElementById("filtroStatus");
   if (statusSelect) {
     statusSelect.addEventListener("change", (e) => {
       filtroStatus = e.target.value; // "", "pendente", "pago", "atrasado"
-      renderizarFaturas(); // reaplica filtros e atualiza resumo + dashboard
+      renderizarFaturas();
     });
   }
 
@@ -602,6 +624,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Primeira carga (já atualiza dashboard também)
+  // Primeira carga
   carregarFaturas();
 });
