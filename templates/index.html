@@ -130,6 +130,7 @@
 
         <!-- FATURAS -->
         <section id="faturasSection" class="section">
+            <!-- ====== ÁREA DE FILTROS (AGORA COM STATUS) ====== -->
             <header class="filtros-header">
                 <div class="field-group">
                     <label for="buscaNumero">Buscar nº de fatura:</label>
@@ -143,6 +144,16 @@
                         <span>a</span>
                         <input type="date" id="filtroDataFimFaturas" />
                     </div>
+                </div>
+
+                <div class="field-group">
+                    <label for="filtroStatus">Status:</label>
+                    <select id="filtroStatus">
+                        <option value="">Todos</option>
+                        <option value="pendente">Pendente</option>
+                        <option value="pago">Pago</option>
+                        <option value="atrasado">Atrasado</option>
+                    </select>
                 </div>
 
                 <div class="filtros-actions">
