@@ -83,7 +83,7 @@
                 </div>
             </div>
 
-            <!-- NOVA TABELA DE RESUMO POR TRANSPORTADORA -->
+            <!-- NOVO: RESUMO POR TRANSPORTADORA -->
             <section class="table-section">
                 <h2>Resumo por transportadora</h2>
                 <table class="tabela">
@@ -96,7 +96,7 @@
                     </tr>
                     </thead>
                     <tbody id="tbodyResumoTransportadoras">
-                    <!-- preenchido via JS -->
+                    <!-- linhas via JS -->
                     </tbody>
                 </table>
             </section>
@@ -161,6 +161,17 @@
                         <span>a</span>
                         <input type="date" id="filtroDataFimFaturas" />
                     </div>
+                </div>
+
+                <!-- NOVO: filtro de STATUS -->
+                <div class="field-group">
+                    <label for="filtroStatus">Status:</label>
+                    <select id="filtroStatus">
+                        <option value="">Todos</option>
+                        <option value="pendente">Pendente</option>
+                        <option value="pago">Pago</option>
+                        <option value="atrasado">Atrasado</option>
+                    </select>
                 </div>
 
                 <div class="filtros-actions">
