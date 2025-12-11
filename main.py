@@ -1,4 +1,4 @@
-from datetime import date, datetime
+ from datetime import date, datetime
 import os
 import uuid
 from typing import List, Optional
@@ -25,7 +25,6 @@ from sqlalchemy import (
     Numeric,
     ForeignKey,
     func,
-    LargeBinary,  # <- NOVO
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
@@ -42,7 +41,7 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Pasta para anexos (não usamos mais para salvar, mas pode ficar se quiser)
+# Pasta para anexos
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
 
@@ -52,7 +51,7 @@ os.makedirs(ANEXOS_DIR, exist_ok=True)
 
 
 class FaturaDB(Base):
-    __tablename__ = "faturas"
+    _tablename_ = "faturas"
 
     id = Column(Integer, primary_key=True, index=True)
     transportadora = Column(String, index=True)
@@ -60,6 +59,8 @@ class FaturaDB(Base):
     valor = Column(Numeric(10, 2))
     data_vencimento = Column(Date)
     status = Column(String, default="pendente")
+    # IMPORTANTE: não colocar coluna "responsavel" aqui,
+    # porque ela NÃO existe no banco e estava causando erro.
     observacao = Column(String, nullable=True)
 
     anexos = relationship(
@@ -71,16 +72,13 @@ class FaturaDB(Base):
 
 
 class AnexoDB(Base):
-    __tablename__ = "anexos"
+    _tablename_ = "anexos"
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    # filename mantido por compatibilidade, mas não é mais usado
-    filename = Column(String, nullable=True)
+    filename = Column(String)       # nome salvo no disco
     original_name = Column(String)  # nome que o usuário enviou
     content_type = Column(String)
-    # dados binários do arquivo, guardados no Postgres
-    dados = Column(LargeBinary, nullable=False)  # NOVO
     criado_em = Column(Date, default=date.today)
 
     fatura = relationship("FaturaDB", back_populates="anexos")
@@ -308,7 +306,12 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # anexos serão apagados automaticamente pelo cascade/ON DELETE CASCADE
+    # Remove arquivos do disco
+    for anexo in fatura.anexos:
+        caminho = os.path.join(ANEXOS_DIR, anexo.filename)
+        if os.path.exists(caminho):
+            os.remove(caminho)
+
     db.delete(fatura)
     db.commit()
     return {"ok": True}
@@ -325,29 +328,30 @@ async def upload_anexos(
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-    """
-    Salva anexos diretamente no banco (campo bytea).
-    """
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    anexos_criados: List[AnexoDB] = []
+    anexos_criados = []
 
     for file in files:
-        conteudo = await file.read()
+        unique_name = f"{uuid.uuid4().hex}_{file.filename}"
+        caminho = os.path.join(ANEXOS_DIR, unique_name)
+
+        with open(caminho, "wb") as f:
+            f.write(await file.read())
 
         anexo_db = AnexoDB(
             fatura_id=fatura_id,
-            filename=None,
+            filename=unique_name,
             original_name=file.filename,
             content_type=file.content_type or "application/octet-stream",
-            dados=conteudo,
         )
         db.add(anexo_db)
         anexos_criados.append(anexo_db)
 
     db.commit()
+
     return anexos_criados
 
 
@@ -362,34 +366,19 @@ def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
 
 @app.get("/anexos/{anexo_id}")
 def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    """
-    Retorna o arquivo salvo no banco.
-    """
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    if not anexo.dados:
+    caminho = os.path.join(ANEXOS_DIR, anexo.filename)
+    if not os.path.exists(caminho):
         raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
 
-    headers = {
-        "Content-Disposition": f'attachment; filename="{anexo.original_name}"'
-    }
-    return Response(anexo.dados, media_type=anexo.content_type, headers=headers)
-
-
-@app.delete("/anexos/{anexo_id}")
-def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    """
-    Exclui um anexo específico (usado no modal).
-    """
-    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
-    if not anexo:
-        raise HTTPException(status_code=404, detail="Anexo não encontrado")
-
-    db.delete(anexo)
-    db.commit()
-    return {"ok": True}
+    return FileResponse(
+        caminho,
+        media_type=anexo.content_type,
+        filename=anexo.original_name,
+    )
 
 
 # =========================
