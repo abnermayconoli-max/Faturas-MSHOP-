@@ -83,29 +83,12 @@
                 </div>
             </div>
 
-            <!-- NOVO: RESUMO POR TRANSPORTADORA (TOTAL / EM DIA / ATRASADO / GERAL) -->
-            <section class="table-section">
+            <!-- RESUMO POR TRANSPORTADORA / BACKLOG -->
+            <section class="table-section dashboard-table">
                 <h2>Resumo por transportadora</h2>
-                <table class="tabela" id="tabelaResumoTransportadora">
-                    <thead>
-                    <tr>
-                        <th>Transportadora</th>
-                        <th>Total atrasado</th>
-                        <th>Total em dia</th>
-                        <th>Total geral</th>
-                    </tr>
-                    </thead>
-                    <tbody id="tbodyResumoTransportadora">
-                    <!-- preenchido via JS -->
-                    </tbody>
-                </table>
-            </section>
-
-            <!-- NOVO: BACKLOG POR VENCIMENTO (HORIZONTAL, COM DATAS) -->
-            <section class="table-section">
-                <h2>Backlog por vencimento</h2>
-                <table class="tabela" id="tabelaBacklog">
-                    <!-- cabeçalho e linha única preenchidos via JS -->
+                <table class="tabela">
+                    <thead id="theadResumoDashboard"></thead>
+                    <tbody id="tbodyResumoDashboard"></tbody>
                 </table>
                 <p class="backlog-label">Backlog</p>
             </section>
@@ -170,6 +153,16 @@
                         <span>a</span>
                         <input type="date" id="filtroDataFimFaturas" />
                     </div>
+                </div>
+
+                <div class="field-group">
+                    <label for="filtroStatus">Status:</label>
+                    <select id="filtroStatus">
+                        <option value="">Todos</option>
+                        <option value="pendente">Pendente</option>
+                        <option value="pago">Pago</option>
+                        <option value="atrasado">Atrasado</option>
+                    </select>
                 </div>
 
                 <div class="filtros-actions">
