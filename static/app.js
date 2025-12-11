@@ -115,9 +115,18 @@ function renderResumoDashboard(lista) {
   const tbody = document.getElementById("tbodyResumoDashboard");
   if (!thead || !tbody) return;
 
+  // Hoje zerado
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
-  const hojeTime = hoje.getTime();
+
+  // Próxima quarta-feira (getDay: dom=0, seg=1, ter=2, qua=3)
+  const weekday = hoje.getDay();
+  let diasAteQuarta = (3 - weekday + 7) % 7;
+  if (diasAteQuarta === 0) diasAteQuarta = 7;
+  const proxQuarta = new Date(hoje);
+  proxQuarta.setDate(hoje.getDate() + diasAteQuarta);
+  proxQuarta.setHours(0, 0, 0, 0);
+  const proxQuartaTime = proxQuarta.getTime();
 
   // considerar só pendentes pra colunas de vencimento
   const datasSet = new Set();
@@ -164,14 +173,18 @@ function renderResumoDashboard(lista) {
 
     const status = (f.status || "").toLowerCase();
     const d = parseISODateLocal(f.data_vencimento);
-    const vencTime = d ? d.getTime() : null;
+    const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
     if (status === "pendente" && vencTime !== null) {
-      if (vencTime < hojeTime) {
+      // Mesma regra do backend:
+      // - atrasado: vencimento < próxima quarta
+      // - em dia:  vencimento == próxima quarta
+      if (vencTime < proxQuartaTime) {
         grupos[transp].totalAtrasado += valor;
-      } else {
+      } else if (vencTime === proxQuartaTime) {
         grupos[transp].totalEmDia += valor;
       }
+
       const key = f.data_vencimento;
       grupos[transp].porData[key] =
         (grupos[transp].porData[key] || 0) + valor;
@@ -304,7 +317,7 @@ function renderizarFaturas() {
     );
   }
 
-  // RESUMO (cards da aba Faturas)
+  // RESUMO (cards da aba Faturas) -> aqui continua regra "hoje"
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
