@@ -128,15 +128,14 @@ function renderResumoDashboard(lista) {
   proxQuarta.setHours(0, 0, 0, 0);
   const proxQuartaTime = proxQuarta.getTime();
 
-  // ============================
-  // COLETAR TODAS AS DATAS COM
-  // STATUS PENDENTE OU ATRASADO
-  // ============================
+  // considerar TODAS as datas com faturas em aberto (pendente ou atrasado)
   const datasSet = new Set();
   lista.forEach((f) => {
-    if (!f.data_vencimento || !f.status) return;
-    const st = f.status.toLowerCase();
-    if (st === "pendente" || st === "atrasado") {
+    const statusLower = (f.status || "").toLowerCase();
+    if (
+      statusLower !== "pago" && // só abertas
+      f.data_vencimento
+    ) {
       datasSet.add(f.data_vencimento);
     }
   });
@@ -169,35 +168,40 @@ function renderResumoDashboard(lista) {
         porData: {},
       };
     }
+
     const valor = Number(f.valor || 0);
+    const statusLower = (f.status || "").toLowerCase();
+
+    // Só conta no dashboard se não estiver pago
+    if (statusLower === "pago") {
+      return;
+    }
+
     grupos[transp].totalGeral += valor;
 
-    const status = (f.status || "").toLowerCase();
     const d = parseISODateLocal(f.data_vencimento);
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
-    // Ignora pagos no backlog
-    if (status === "pago" || vencTime === null) return;
+    if (vencTime !== null) {
+      // Regras de classificação:
+      // - status "atrasado" => sempre vai pra Total atrasado
+      // - status "pendente":
+      //      venc < proxQuarta -> atrasado
+      //      venc == proxQuarta -> em dia
+      if (statusLower === "atrasado") {
+        grupos[transp].totalAtrasado += valor;
+      } else if (statusLower === "pendente") {
+        if (vencTime < proxQuartaTime) {
+          grupos[transp].totalAtrasado += valor;
+        } else if (vencTime === proxQuartaTime) {
+          grupos[transp].totalEmDia += valor;
+        }
+      }
+    }
 
-    // Soma nas datas (colunas) para pendentes + atrasados
     const key = f.data_vencimento;
     grupos[transp].porData[key] =
       (grupos[transp].porData[key] || 0) + valor;
-
-    // Regra dos totais:
-    // - status "atrasado" entra direto em atrasado
-    // - status "pendente":
-    //     atrasado  -> venc < proxQuarta
-    //     em dia    -> venc == proxQuarta
-    if (status === "atrasado") {
-      grupos[transp].totalAtrasado += valor;
-    } else if (status === "pendente") {
-      if (vencTime < proxQuartaTime) {
-        grupos[transp].totalAtrasado += valor;
-      } else if (vencTime === proxQuartaTime) {
-        grupos[transp].totalEmDia += valor;
-      }
-    }
   });
 
   tbody.innerHTML = "";
@@ -326,29 +330,15 @@ function renderizarFaturas() {
     );
   }
 
-  // ========= RESUMO (cards da aba Faturas) COM REGRA DA PRÓXIMA QUARTA =========
+  // RESUMO (cards da aba Faturas) -> aqui continua regra "hoje"
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
   let pagas = 0;
 
-  // Hoje zerado
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
-
-  // Mesma lógica do backend (Python) para achar a PRÓXIMA quarta-feira
-  const jsDay = hoje.getDay();        // 0..6 (dom=0)
-  const weekday = (jsDay + 6) % 7;    // seg=0, ter=1, qua=2, ...
-
-  let diasAteQuarta = (2 - weekday) % 7; // 2 = quarta
-  if (diasAteQuarta <= 0) {
-    diasAteQuarta += 7;               // sempre próxima quarta
-  }
-
-  const proxQuarta = new Date(hoje);
-  proxQuarta.setDate(proxQuarta.getDate() + diasAteQuarta);
-  proxQuarta.setHours(0, 0, 0, 0);
-  const proxQuartaTime = proxQuarta.getTime();
+  const hojeTime = hoje.getTime();
 
   lista.forEach((f) => {
     const valor = Number(f.valor || 0);
@@ -361,9 +351,7 @@ function renderizarFaturas() {
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
-      // atrasadas = pendentes com vencimento < próxima quarta
-      // pendentes = pendentes com vencimento >= próxima quarta
-      if (vencTime !== null && vencTime < proxQuartaTime) {
+      if (vencTime !== null && vencTime < hojeTime) {
         atrasadas += valor;
       } else {
         pendentes += valor;
@@ -379,7 +367,6 @@ function renderizarFaturas() {
   document.getElementById("fatAtrasadas").textContent =
     formatCurrency(atrasadas);
   document.getElementById("fatPagas").textContent = formatCurrency(pagas);
-  // ===================== FIM RESUMO FATURAS =====================
 
   // TABELA
   if (lista.length === 0) {
