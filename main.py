@@ -25,6 +25,8 @@ from sqlalchemy import (
     Numeric,
     ForeignKey,
     func,
+    and_,
+    or_,
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
@@ -380,10 +382,15 @@ def resumo_dashboard(
     ate_vencimento: Optional[str] = Query(None),
 ):
     """
-    Regra:
-    - PENDENTES  = todas as faturas com status 'pendente'
-    - ATRASADAS  = pendentes com vencimento < próxima quarta-feira
-    - EM DIA     = pendentes com vencimento == próxima quarta-feira
+    Regra ajustada para bater com o Dashboard (tabela):
+
+    - TOTAL       = soma de todos os valores filtrados
+    - PENDENTES   = todas as faturas com status 'pendente'
+    - ATRASADAS   = faturas com:
+        * status 'atrasado'
+          OU
+        * status 'pendente' e vencimento < próxima quarta
+    - EM DIA      = faturas com status 'pendente' e vencimento == próxima quarta
     """
 
     hoje = date.today()
@@ -413,21 +420,32 @@ def resumo_dashboard(
         func.coalesce(func.sum(FaturaDB.valor), 0)
     ).scalar()
 
+    # todas as pendentes (independente de data)
     pendentes_val = (
         query_base.filter(FaturaDB.status.ilike("pendente"))
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
+    # ATRASADAS:
+    # - status 'atrasado'
+    #   OU
+    # - status 'pendente' e data_vencimento < prox_quarta
     atrasadas_val = (
         query_base.filter(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento < prox_quarta,
+            or_(
+                FaturaDB.status.ilike("atrasado"),
+                and_(
+                    FaturaDB.status.ilike("pendente"),
+                    FaturaDB.data_vencimento < prox_quarta,
+                ),
+            )
         )
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
+    # EM DIA: pendentes com vencimento == prox_quarta
     em_dia_val = (
         query_base.filter(
             FaturaDB.status.ilike("pendente"),
