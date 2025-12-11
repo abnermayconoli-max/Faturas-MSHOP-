@@ -9,6 +9,7 @@ let filtroNumeroFatura = "";
 // Filtros só da aba Faturas
 let filtroDataInicioFaturas = "";
 let filtroDataFimFaturas = "";
+let filtroStatus = "";
 
 // Cache da última lista vinda da API
 let ultimaListaFaturas = [];
@@ -57,10 +58,9 @@ function formatDate(isoDate) {
 
 // ============ DASHBOARD ============
 
-// O resumo do dashboard agora é calculado em renderizarFaturas()
-// usando a mesma lista, então essa função fica só para compatibilidade.
+// Agora o dashboard é atualizado a partir das faturas já carregadas.
 async function carregarDashboard() {
-  // nada específico aqui; o resumo é atualizado por renderizarFaturas()
+  // nada específico aqui, quem manda é renderizarFaturas()
 }
 
 // ============ FATURAS (LISTA + RESUMO) ============
@@ -88,10 +88,106 @@ async function carregarFaturas() {
 
     const faturas = await resp.json();
     ultimaListaFaturas = faturas;
-    renderizarFaturas(); // atualiza tudo: cards + tabelas
+    renderizarFaturas(); // atualiza Faturas + Dashboard + Resumo por transportadora
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar faturas");
+  }
+}
+
+// resumo por transportadora (usado no dashboard)
+function atualizarResumoTransportadoras(lista) {
+  const tbodyResumo = document.getElementById("tbodyResumoTransportadoras");
+  if (!tbodyResumo) return;
+
+  tbodyResumo.innerHTML = "";
+
+  if (!lista || lista.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.textContent = "Nenhuma fatura encontrada.";
+    td.style.textAlign = "center";
+    td.style.padding = "12px";
+    tr.appendChild(td);
+    tbodyResumo.appendChild(tr);
+    return;
+  }
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const hojeTime = hoje.getTime();
+
+  const mapa = new Map();
+
+  lista.forEach((f) => {
+    const nome = f.transportadora || "—";
+    const valor = Number(f.valor || 0);
+    const status = (f.status || "").toLowerCase();
+
+    let dVenc = null;
+    let vencTime = null;
+    if (f.data_vencimento) {
+      dVenc = parseISODateLocal(f.data_vencimento);
+      if (dVenc && !Number.isNaN(dVenc.getTime())) {
+        vencTime = dVenc.setHours(0, 0, 0, 0);
+      }
+    }
+
+    if (!mapa.has(nome)) {
+      mapa.set(nome, { atrasado: 0, emdia: 0, total: 0 });
+    }
+
+    const agg = mapa.get(nome);
+    agg.total += valor;
+
+    if (status === "pago") {
+      agg.emdia += valor;
+    } else if (status === "pendente") {
+      if (vencTime !== null && vencTime < hojeTime) {
+        agg.atrasado += valor;
+      } else {
+        agg.emdia += valor;
+      }
+    } else if (status === "atrasado") {
+      agg.atrasado += valor;
+    }
+  });
+
+  const nomesOrdenados = Array.from(mapa.keys()).sort((a, b) =>
+    a.localeCompare(b, "pt-BR")
+  );
+
+  let totalAtrasado = 0;
+  let totalEmDia = 0;
+  let totalGeral = 0;
+
+  nomesOrdenados.forEach((nome) => {
+    const { atrasado, emdia, total } = mapa.get(nome);
+
+    totalAtrasado += atrasado;
+    totalEmDia += emdia;
+    totalGeral += total;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${nome}</td>
+      <td>${formatCurrency(atrasado)}</td>
+      <td>${formatCurrency(emdia)}</td>
+      <td>${formatCurrency(total)}</td>
+    `;
+    tbodyResumo.appendChild(tr);
+  });
+
+  if (nomesOrdenados.length > 0) {
+    const trTotal = document.createElement("tr");
+    trTotal.innerHTML = `
+      <td><strong>Total geral</strong></td>
+      <td><strong>${formatCurrency(totalAtrasado)}</strong></td>
+      <td><strong>${formatCurrency(totalEmDia)}</strong></td>
+      <td><strong>${formatCurrency(totalGeral)}</strong></td>
+    `;
+    tbodyResumo.appendChild(trTotal);
   }
 }
 
@@ -99,9 +195,7 @@ function renderizarFaturas() {
   const tbody = document.getElementById("tbodyFaturas");
   tbody.innerHTML = "";
 
-  let lista = Array.isArray(ultimaListaFaturas)
-    ? [...ultimaListaFaturas]
-    : [];
+  let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
   // ------- Filtro por período só da aba Faturas -------
   if (filtroDataInicioFaturas || filtroDataFimFaturas) {
@@ -128,7 +222,15 @@ function renderizarFaturas() {
     });
   }
 
-  // ------- RESUMO (aba Faturas + Dashboard + por transportadora) -------
+  // ------- Filtro por STATUS (aba Faturas + Dashboard + Resumo transp.) -------
+  if (filtroStatus) {
+    lista = lista.filter((f) => {
+      const st = (f.status || "").toLowerCase();
+      return st === filtroStatus;
+    });
+  }
+
+  // ------- RESUMO (aba Faturas + Dashboard) -------
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
@@ -138,56 +240,38 @@ function renderizarFaturas() {
   hoje.setHours(0, 0, 0, 0);
   const hojeTime = hoje.getTime();
 
-  // resumo por transportadora
-  const resumoPorTransp = {};
-
   lista.forEach((f) => {
     const valor = Number(f.valor || 0);
     total += valor;
 
     const status = (f.status || "").toLowerCase();
+
     const dVenc = parseISODateLocal(f.data_vencimento);
     const vencTime =
       dVenc && !Number.isNaN(dVenc.getTime())
         ? dVenc.setHours(0, 0, 0, 0)
         : null;
 
-    let ehAtrasada = false;
-
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
       if (vencTime !== null && vencTime < hojeTime) {
         atrasadas += valor;
-        ehAtrasada = true;
       } else {
         pendentes += valor;
       }
     } else if (status === "atrasado") {
       atrasadas += valor;
-      ehAtrasada = true;
-    }
-
-    const chave = f.transportadora || "Sem transportadora";
-    if (!resumoPorTransp[chave]) {
-      resumoPorTransp[chave] = {
-        transportadora: chave,
-        total: 0,
-        atrasadas: 0,
-      };
-    }
-    resumoPorTransp[chave].total += valor;
-    if (ehAtrasada) {
-      resumoPorTransp[chave].atrasadas += valor;
     }
   });
 
+  // ----- cards da ABA FATURAS -----
   document.getElementById("fatTotal").textContent = formatCurrency(total);
   document.getElementById("fatPendentes").textContent = formatCurrency(pendentes);
   document.getElementById("fatAtrasadas").textContent = formatCurrency(atrasadas);
   document.getElementById("fatPagas").textContent = formatCurrency(pagas);
 
-  // ----- Atualiza cards do DASHBOARD com o MESMO resumo -----
+  // ----- cards do DASHBOARD (iguais aos da aba Faturas) -----
   try {
     const cardTotal = document.getElementById("cardTotal");
     const cardPendentes = document.getElementById("cardPendentes");
@@ -199,7 +283,6 @@ function renderizarFaturas() {
       cardPendentes.textContent = formatCurrency(pendentes);
       cardAtrasadas.textContent = formatCurrency(atrasadas);
 
-      // Em dia = total - atrasadas (pagas + pendentes em dia)
       const emDia = total - atrasadas;
       cardEmDia.textContent = formatCurrency(emDia);
     }
@@ -207,59 +290,10 @@ function renderizarFaturas() {
     console.warn("Erro ao atualizar dashboard:", e);
   }
 
-  // ----- NOVA TABELA: RESUMO POR TRANSPORTADORA -----
-  const tbodyResumo = document.getElementById("tbodyResumoTransportadoras");
-  if (tbodyResumo) {
-    tbodyResumo.innerHTML = "";
+  // ----- tabela de resumo por transportadora no dashboard -----
+  atualizarResumoTransportadoras(lista);
 
-    const nomes = Object.keys(resumoPorTransp);
-    if (nomes.length === 0) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 4;
-      td.textContent = "Nenhuma fatura encontrada.";
-      td.style.textAlign = "center";
-      td.style.padding = "10px";
-      tr.appendChild(td);
-      tbodyResumo.appendChild(tr);
-    } else {
-      let totalGeral = 0;
-      let totalAtrasadoGeral = 0;
-      let totalEmDiaGeral = 0;
-
-      nomes.sort().forEach((nome) => {
-        const r = resumoPorTransp[nome];
-        const totalTransp = r.total;
-        const atrasadoTransp = r.atrasadas;
-        const emDiaTransp = totalTransp - atrasadoTransp;
-
-        totalGeral += totalTransp;
-        totalAtrasadoGeral += atrasadoTransp;
-        totalEmDiaGeral += emDiaTransp;
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${nome}</td>
-          <td>${formatCurrency(atrasadoTransp)}</td>
-          <td>${formatCurrency(emDiaTransp)}</td>
-          <td>${formatCurrency(totalTransp)}</td>
-        `;
-        tbodyResumo.appendChild(tr);
-      });
-
-      const trTotal = document.createElement("tr");
-      trTotal.classList.add("resumo-total-row");
-      trTotal.innerHTML = `
-        <td>Total geral</td>
-        <td>${formatCurrency(totalAtrasadoGeral)}</td>
-        <td>${formatCurrency(totalEmDiaGeral)}</td>
-        <td>${formatCurrency(totalGeral)}</td>
-      `;
-      tbodyResumo.appendChild(trTotal);
-    }
-  }
-
-  // ------- TABELA DE FATURAS -------
+  // ------- TABELA FATURAS -------
   if (lista.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -373,18 +407,16 @@ async function abrirModalAnexos(faturaId) {
     if (!resp.ok) throw new Error("Erro ao listar anexos");
     const anexos = await resp.json();
 
-    if (!Array.isArray(anexos) || anexos.length === 0) {
+    if (!anexos || anexos.length === 0) {
       lista.innerHTML = "<li>Sem anexos.</li>";
     } else {
       lista.innerHTML = "";
       anexos.forEach((a) => {
         const li = document.createElement("li");
-
         const link = document.createElement("a");
         link.href = `${API_BASE}/anexos/${a.id}`;
         link.target = "_blank";
         link.textContent = a.original_name;
-
         li.appendChild(link);
         lista.appendChild(li);
       });
@@ -532,6 +564,7 @@ document.addEventListener("DOMContentLoaded", () => {
     filtroNumeroFatura = "";
     filtroDataInicioFaturas = "";
     filtroDataFimFaturas = "";
+    filtroStatus = "";
 
     const filtroVencInput = document.getElementById("filtroVencimento");
     if (filtroVencInput) filtroVencInput.value = "";
@@ -544,12 +577,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (ini) ini.value = "";
     if (fim) fim.value = "";
 
+    const statusSelect = document.getElementById("filtroStatus");
+    if (statusSelect) statusSelect.value = "";
+
     document
       .querySelectorAll(".transportadora-btn")
       .forEach((b) => b.classList.remove("selected"));
 
     ativarAba("dashboard");
-    carregarFaturas(); // atualiza tudo (dashboard incluso)
+    carregarFaturas();
   });
 
   // Transportadoras sidebar
@@ -580,15 +616,19 @@ document.addEventListener("DOMContentLoaded", () => {
       filtroNumeroFatura = "";
       filtroDataInicioFaturas = "";
       filtroDataFimFaturas = "";
+      filtroStatus = "";
 
       if (filtroVencInput) filtroVencInput.value = "";
-      const buscaNumeroLocal = document.getElementById("buscaNumero");
-      if (buscaNumeroLocal) buscaNumeroLocal.value = "";
+      const buscaNumero = document.getElementById("buscaNumero");
+      if (buscaNumero) buscaNumero.value = "";
 
       const ini = document.getElementById("filtroDataInicioFaturas");
       const fim = document.getElementById("filtroDataFimFaturas");
       if (ini) ini.value = "";
       if (fim) fim.value = "";
+
+      const statusSelect = document.getElementById("filtroStatus");
+      if (statusSelect) statusSelect.value = "";
 
       carregarFaturas();
     });
@@ -615,6 +655,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if (fim) {
     fim.addEventListener("change", (e) => {
       filtroDataFimFaturas = e.target.value;
+      renderizarFaturas();
+    });
+  }
+
+  // Filtro por STATUS (novo)
+  const statusSelect = document.getElementById("filtroStatus");
+  if (statusSelect) {
+    statusSelect.addEventListener("change", (e) => {
+      filtroStatus = e.target.value; // "", "pendente", "pago", "atrasado"
       renderizarFaturas();
     });
   }
@@ -649,6 +698,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Primeira carga
+  // Primeira carga (já atualiza dashboard e resumo por transportadora)
   carregarFaturas();
 });
