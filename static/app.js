@@ -9,7 +9,6 @@ let filtroNumeroFatura = "";
 // Filtros só da aba Faturas
 let filtroDataInicioFaturas = "";
 let filtroDataFimFaturas = "";
-let filtroStatus = ""; // novo filtro de status
 
 // Cache da última lista vinda da API
 let ultimaListaFaturas = [];
@@ -58,9 +57,10 @@ function formatDate(isoDate) {
 
 // ============ DASHBOARD ============
 
-// Agora o dashboard usa o mesmo resumo calculado em renderizarFaturas.
+// O resumo do dashboard agora é calculado em renderizarFaturas()
+// usando a mesma lista, então essa função fica só para compatibilidade.
 async function carregarDashboard() {
-  // Nada específico: o resumo é atualizado em renderizarFaturas()
+  // nada específico aqui; o resumo é atualizado por renderizarFaturas()
 }
 
 // ============ FATURAS (LISTA + RESUMO) ============
@@ -88,7 +88,7 @@ async function carregarFaturas() {
 
     const faturas = await resp.json();
     ultimaListaFaturas = faturas;
-    renderizarFaturas(); // atualiza tabela + cards + dashboard
+    renderizarFaturas(); // atualiza tudo: cards + tabelas
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar faturas");
@@ -128,15 +128,7 @@ function renderizarFaturas() {
     });
   }
 
-  // ------- Filtro por STATUS -------
-  if (filtroStatus) {
-    lista = lista.filter((f) => {
-      const st = (f.status || "").toLowerCase();
-      return st === filtroStatus;
-    });
-  }
-
-  // ------- RESUMO (aba Faturas + Dashboard) -------
+  // ------- RESUMO (aba Faturas + Dashboard + por transportadora) -------
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
@@ -145,6 +137,9 @@ function renderizarFaturas() {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   const hojeTime = hoje.getTime();
+
+  // resumo por transportadora
+  const resumoPorTransp = {};
 
   lista.forEach((f) => {
     const valor = Number(f.valor || 0);
@@ -157,26 +152,42 @@ function renderizarFaturas() {
         ? dVenc.setHours(0, 0, 0, 0)
         : null;
 
+    let ehAtrasada = false;
+
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
       if (vencTime !== null && vencTime < hojeTime) {
         atrasadas += valor;
+        ehAtrasada = true;
       } else {
         pendentes += valor;
       }
     } else if (status === "atrasado") {
       atrasadas += valor;
+      ehAtrasada = true;
+    }
+
+    const chave = f.transportadora || "Sem transportadora";
+    if (!resumoPorTransp[chave]) {
+      resumoPorTransp[chave] = {
+        transportadora: chave,
+        total: 0,
+        atrasadas: 0,
+      };
+    }
+    resumoPorTransp[chave].total += valor;
+    if (ehAtrasada) {
+      resumoPorTransp[chave].atrasadas += valor;
     }
   });
 
-  // ----- Cards da aba FATURAS -----
   document.getElementById("fatTotal").textContent = formatCurrency(total);
   document.getElementById("fatPendentes").textContent = formatCurrency(pendentes);
   document.getElementById("fatAtrasadas").textContent = formatCurrency(atrasadas);
   document.getElementById("fatPagas").textContent = formatCurrency(pagas);
 
-  // ----- Cards do DASHBOARD (mesmos valores) -----
+  // ----- Atualiza cards do DASHBOARD com o MESMO resumo -----
   try {
     const cardTotal = document.getElementById("cardTotal");
     const cardPendentes = document.getElementById("cardPendentes");
@@ -188,6 +199,7 @@ function renderizarFaturas() {
       cardPendentes.textContent = formatCurrency(pendentes);
       cardAtrasadas.textContent = formatCurrency(atrasadas);
 
+      // Em dia = total - atrasadas (pagas + pendentes em dia)
       const emDia = total - atrasadas;
       cardEmDia.textContent = formatCurrency(emDia);
     }
@@ -195,7 +207,59 @@ function renderizarFaturas() {
     console.warn("Erro ao atualizar dashboard:", e);
   }
 
-  // ------- TABELA -------
+  // ----- NOVA TABELA: RESUMO POR TRANSPORTADORA -----
+  const tbodyResumo = document.getElementById("tbodyResumoTransportadoras");
+  if (tbodyResumo) {
+    tbodyResumo.innerHTML = "";
+
+    const nomes = Object.keys(resumoPorTransp);
+    if (nomes.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 4;
+      td.textContent = "Nenhuma fatura encontrada.";
+      td.style.textAlign = "center";
+      td.style.padding = "10px";
+      tr.appendChild(td);
+      tbodyResumo.appendChild(tr);
+    } else {
+      let totalGeral = 0;
+      let totalAtrasadoGeral = 0;
+      let totalEmDiaGeral = 0;
+
+      nomes.sort().forEach((nome) => {
+        const r = resumoPorTransp[nome];
+        const totalTransp = r.total;
+        const atrasadoTransp = r.atrasadas;
+        const emDiaTransp = totalTransp - atrasadoTransp;
+
+        totalGeral += totalTransp;
+        totalAtrasadoGeral += atrasadoTransp;
+        totalEmDiaGeral += emDiaTransp;
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${nome}</td>
+          <td>${formatCurrency(atrasadoTransp)}</td>
+          <td>${formatCurrency(emDiaTransp)}</td>
+          <td>${formatCurrency(totalTransp)}</td>
+        `;
+        tbodyResumo.appendChild(tr);
+      });
+
+      const trTotal = document.createElement("tr");
+      trTotal.classList.add("resumo-total-row");
+      trTotal.innerHTML = `
+        <td>Total geral</td>
+        <td>${formatCurrency(totalAtrasadoGeral)}</td>
+        <td>${formatCurrency(totalEmDiaGeral)}</td>
+        <td>${formatCurrency(totalGeral)}</td>
+      `;
+      tbodyResumo.appendChild(trTotal);
+    }
+  }
+
+  // ------- TABELA DE FATURAS -------
   if (lista.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -319,31 +383,9 @@ async function abrirModalAnexos(faturaId) {
         const link = document.createElement("a");
         link.href = `${API_BASE}/anexos/${a.id}`;
         link.target = "_blank";
-        link.textContent = a.original_name || `Anexo ${a.id}`;
-
-        const btnDel = document.createElement("button");
-        btnDel.textContent = "Excluir";
-        btnDel.classList.add("btn-excluir-anexo");
-
-        btnDel.addEventListener("click", async () => {
-          if (!confirm(`Excluir anexo "${a.original_name}"?`)) return;
-          try {
-            const respDel = await fetch(`${API_BASE}/anexos/${a.id}`, {
-              method: "DELETE",
-            });
-            if (!respDel.ok) {
-              throw new Error("Erro ao excluir anexo");
-            }
-            // Recarrega lista após excluir
-            await abrirModalAnexos(faturaId);
-          } catch (err) {
-            console.error(err);
-            alert("Erro ao excluir anexo");
-          }
-        });
+        link.textContent = a.original_name;
 
         li.appendChild(link);
-        li.appendChild(btnDel);
         lista.appendChild(li);
       });
     }
@@ -490,7 +532,6 @@ document.addEventListener("DOMContentLoaded", () => {
     filtroNumeroFatura = "";
     filtroDataInicioFaturas = "";
     filtroDataFimFaturas = "";
-    filtroStatus = "";
 
     const filtroVencInput = document.getElementById("filtroVencimento");
     if (filtroVencInput) filtroVencInput.value = "";
@@ -503,15 +544,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (ini) ini.value = "";
     if (fim) fim.value = "";
 
-    const statusSelect = document.getElementById("filtroStatus");
-    if (statusSelect) statusSelect.value = "";
-
     document
       .querySelectorAll(".transportadora-btn")
       .forEach((b) => b.classList.remove("selected"));
 
     ativarAba("dashboard");
-    carregarFaturas();
+    carregarFaturas(); // atualiza tudo (dashboard incluso)
   });
 
   // Transportadoras sidebar
@@ -542,19 +580,15 @@ document.addEventListener("DOMContentLoaded", () => {
       filtroNumeroFatura = "";
       filtroDataInicioFaturas = "";
       filtroDataFimFaturas = "";
-      filtroStatus = "";
 
       if (filtroVencInput) filtroVencInput.value = "";
-      const buscaNumero = document.getElementById("buscaNumero");
-      if (buscaNumero) buscaNumero.value = "";
+      const buscaNumeroLocal = document.getElementById("buscaNumero");
+      if (buscaNumeroLocal) buscaNumeroLocal.value = "";
 
       const ini = document.getElementById("filtroDataInicioFaturas");
       const fim = document.getElementById("filtroDataFimFaturas");
       if (ini) ini.value = "";
       if (fim) fim.value = "";
-
-      const statusSelect = document.getElementById("filtroStatus");
-      if (statusSelect) statusSelect.value = "";
 
       carregarFaturas();
     });
@@ -581,15 +615,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (fim) {
     fim.addEventListener("change", (e) => {
       filtroDataFimFaturas = e.target.value;
-      renderizarFaturas();
-    });
-  }
-
-  // Filtro por STATUS
-  const statusSelect = document.getElementById("filtroStatus");
-  if (statusSelect) {
-    statusSelect.addEventListener("change", (e) => {
-      filtroStatus = e.target.value; // "", "pendente", "pago", "atrasado"
       renderizarFaturas();
     });
   }
