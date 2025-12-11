@@ -230,7 +230,7 @@ button.primary {
 }
 
 button.primary:hover {
- 背景: #22c55e;
+  background: #22c55e;
   border-color: #22c55e;
 }
 
@@ -268,7 +268,7 @@ button.secondary:hover {
   color: #9ca3af;
 }
 
-/* NOVO: select de status no header */
+/* select do filtro de STATUS */
 .field-group select {
   border-radius: 999px;
   border: 1px solid #1f2937;
@@ -306,7 +306,7 @@ button.secondary:hover {
   gap: 8px;
 }
 
-/* ========== TABELA ========== */
+/* ========== TABELA FATURAS ========== */
 
 .table-section {
   margin-top: 18px;
@@ -455,4 +455,56 @@ button.secondary:hover {
 
 #listaAnexos a:hover {
   text-decoration: underline;
+}
+
+/* ========== DASHBOARD - RESUMO POR TRANSPORTADORA ========== */
+/* essas classes são usadas na parte nova do dashboard */
+
+.dash-transportadoras {
+  margin-top: 28px;
+}
+
+.dash-transportadoras h2 {
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+
+.dash-table-wrapper {
+  background: rgba(15, 23, 42, 0.95);
+  border-radius: 16px;
+  border: 1px solid #1f2937;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  overflow-x: auto;
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+
+.dash-table thead {
+  background: #020617;
+}
+
+.dash-table th,
+.dash-table td {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid #111827;
+}
+
+.dash-table th {
+  text-align: left;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.dash-table tbody tr:hover {
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.dash-table tfoot td {
+  font-weight: 600;
+  background: #020617;
 }
