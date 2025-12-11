@@ -255,7 +255,6 @@ button.secondary:hover {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 12px;
-  flex-wrap: wrap;
 }
 
 .field-group {
@@ -269,7 +268,6 @@ button.secondary:hover {
   color: #9ca3af;
 }
 
-/* input texto filtro */
 #buscaNumero {
   min-width: 220px;
   border-radius: 999px;
@@ -277,16 +275,6 @@ button.secondary:hover {
   background: #020617;
   color: #e5e7eb;
   padding: 9px 14px;
-}
-
-/* select status filtro */
-.field-group select {
-  border-radius: 999px;
-  border: 1px solid #1f2937;
-  background: #020617;
-  color: #e5e7eb;
-  padding: 8px 12px;
-  font-size: 14px;
 }
 
 .date-range {
@@ -308,6 +296,16 @@ button.secondary:hover {
   gap: 8px;
 }
 
+/* select nos filtros (caso use depois) */
+.field-group select {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
 /* ========== TABELA ========== */
 
 .table-section {
@@ -324,7 +322,7 @@ button.secondary:hover {
   border-collapse: collapse;
   background: rgba(15, 23, 42, 0.95);
   border-radius: 14px;
-  /* sem overflow hidden pra não cortar dropdown */
+  overflow: hidden;
 }
 
 .tabela thead {
@@ -448,33 +446,24 @@ button.secondary:hover {
 
 #listaAnexos li {
   margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 #listaAnexos a {
   color: #22c55e;
   text-decoration: none;
-  word-break: break-all;
 }
 
 #listaAnexos a:hover {
   text-decoration: underline;
 }
 
-/* botão excluir anexo */
-.btn-excluir-anexo {
-  border-radius: 999px;
-  border: 1px solid #7f1d1d;
-  background: #991b1b;
-  color: #fee2e2;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
+/* ========== DASHBOARD - RESUMO POR TRANSPORTADORA ========== */
+
+#dashboardSection .table-section {
+  margin-top: 24px;
 }
 
-.btn-excluir-anexo:hover {
-  background: #b91c1c;
+.resumo-total-row {
+  background: #111827;
+  font-weight: 600;
 }
