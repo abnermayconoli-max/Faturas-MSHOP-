@@ -128,12 +128,12 @@ function renderResumoDashboard(lista) {
   proxQuarta.setHours(0, 0, 0, 0);
   const proxQuartaTime = proxQuarta.getTime();
 
-  // considerar só pendentes pra colunas de vencimento
+  // considerar TODAS as datas com faturas em aberto (pendente ou atrasado)
   const datasSet = new Set();
   lista.forEach((f) => {
+    const statusLower = (f.status || "").toLowerCase();
     if (
-      f.status &&
-      f.status.toLowerCase() === "pendente" &&
+      statusLower !== "pago" && // só abertas
       f.data_vencimento
     ) {
       datasSet.add(f.data_vencimento);
@@ -168,27 +168,40 @@ function renderResumoDashboard(lista) {
         porData: {},
       };
     }
+
     const valor = Number(f.valor || 0);
+    const statusLower = (f.status || "").toLowerCase();
+
+    // Só conta no dashboard se não estiver pago
+    if (statusLower === "pago") {
+      return;
+    }
+
     grupos[transp].totalGeral += valor;
 
-    const status = (f.status || "").toLowerCase();
     const d = parseISODateLocal(f.data_vencimento);
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
-    if (status === "pendente" && vencTime !== null) {
-      // Mesma regra do backend:
-      // - atrasado: vencimento < próxima quarta
-      // - em dia:  vencimento == próxima quarta
-      if (vencTime < proxQuartaTime) {
+    if (vencTime !== null) {
+      // Regras de classificação:
+      // - status "atrasado" => sempre vai pra Total atrasado
+      // - status "pendente":
+      //      venc < proxQuarta -> atrasado
+      //      venc == proxQuarta -> em dia
+      if (statusLower === "atrasado") {
         grupos[transp].totalAtrasado += valor;
-      } else if (vencTime === proxQuartaTime) {
-        grupos[transp].totalEmDia += valor;
+      } else if (statusLower === "pendente") {
+        if (vencTime < proxQuartaTime) {
+          grupos[transp].totalAtrasado += valor;
+        } else if (vencTime === proxQuartaTime) {
+          grupos[transp].totalEmDia += valor;
+        }
       }
-
-      const key = f.data_vencimento;
-      grupos[transp].porData[key] =
-        (grupos[transp].porData[key] || 0) + valor;
     }
+
+    const key = f.data_vencimento;
+    grupos[transp].porData[key] =
+      (grupos[transp].porData[key] || 0) + valor;
   });
 
   tbody.innerHTML = "";
@@ -370,16 +383,6 @@ function renderizarFaturas() {
 
   lista.forEach((f) => {
     const tr = document.createElement("tr");
-
-    // guardo os dados principais como data-* pra usar no clique delegado
-    tr.dataset.id = f.id;
-    tr.dataset.transportadora = f.transportadora || "";
-    tr.dataset.numeroFatura = f.numero_fatura || "";
-    tr.dataset.valor = f.valor != null ? String(f.valor) : "0";
-    tr.dataset.dataVencimento = f.data_vencimento || "";
-    tr.dataset.status = f.status || "";
-    tr.dataset.observacao = f.observacao || "";
-
     tr.innerHTML = `
       <td>${f.id}</td>
       <td>${f.transportadora}</td>
@@ -398,9 +401,44 @@ function renderizarFaturas() {
         </div>
       </td>
     `;
+
+    const menuBtn = tr.querySelector(".menu-btn");
+    const dropdown = tr.querySelector(".menu-dropdown");
+
+    menuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      document
+        .querySelectorAll(".menu-dropdown.ativo")
+        .forEach((m) => m.classList.remove("ativo"));
+      dropdown.classList.toggle("ativo");
+    });
+
+    dropdown.addEventListener("click", async (e) => {
+      const acao = e.target.dataset.acao;
+      if (!acao) return;
+
+      if (acao === "excluir") {
+        await excluirFatura(f.id);
+      } else if (acao === "editar") {
+        preencherFormularioEdicao(f);
+      } else if (acao === "anexos") {
+        abrirModalAnexos(f.id);
+      }
+
+      dropdown.classList.remove("ativo");
+    });
+
     tbody.appendChild(tr);
   });
 }
+
+// Fechar menus se clicar fora
+document.addEventListener("click", () => {
+  document
+    .querySelectorAll(".menu-dropdown.ativo")
+    .forEach((m) => m.classList.remove("ativo"));
+});
 
 // ============ EXCLUIR / EDITAR / ANEXOS ============
 
@@ -571,71 +609,6 @@ function exportarExcel() {
 
   window.open(url, "_blank");
 }
-
-// ============ CLICK GLOBAL (MENUS DE AÇÃO) ============
-
-document.addEventListener("click", async (e) => {
-  const btnMenu = e.target.closest(".menu-btn");
-  const btnAcao = e.target.closest(".menu-dropdown button[data-acao]");
-
-  // Clique nos três pontinhos
-  if (btnMenu) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const dropdown = btnMenu.nextElementSibling;
-    // fecha todos os outros
-    document
-      .querySelectorAll(".menu-dropdown.ativo")
-      .forEach((m) => {
-        if (m !== dropdown) m.classList.remove("ativo");
-      });
-
-    if (dropdown) dropdown.classList.toggle("ativo");
-    return;
-  }
-
-  // Clique em alguma ação do menu
-  if (btnAcao) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const acao = btnAcao.dataset.acao;
-    const tr = btnAcao.closest("tr");
-    if (!tr) return;
-    const id = tr.dataset.id;
-
-    if (!id) return;
-
-    if (acao === "excluir") {
-      await excluirFatura(id);
-    } else if (acao === "editar") {
-      const f = {
-        id: Number(id),
-        transportadora: tr.dataset.transportadora || "",
-        numero_fatura: tr.dataset.numeroFatura || "",
-        valor: tr.dataset.valor || "0",
-        data_vencimento: tr.dataset.dataVencimento || "",
-        status: tr.dataset.status || "",
-        observacao: tr.dataset.observacao || "",
-      };
-      preencherFormularioEdicao(f);
-    } else if (acao === "anexos") {
-      await abrirModalAnexos(id);
-    }
-
-    document
-      .querySelectorAll(".menu-dropdown.ativo")
-      .forEach((m) => m.classList.remove("ativo"));
-
-    return;
-  }
-
-  // Clique em qualquer outro lugar: fecha menus abertos
-  document
-    .querySelectorAll(".menu-dropdown.ativo")
-    .forEach((m) => m.classList.remove("ativo"));
-});
 
 // ============ INIT ============
 
