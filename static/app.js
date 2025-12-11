@@ -1,7 +1,7 @@
 // URL base (vazio = mesmo domínio)
 const API_BASE = "";
 
-// Estado de filtros globais (sidebar / topo)
+// Estado de filtros globais
 let filtroTransportadora = "";
 let filtroVencimento = "";
 let filtroNumeroFatura = "";
@@ -11,12 +11,11 @@ let filtroDataInicioFaturas = "";
 let filtroDataFimFaturas = "";
 let filtroStatus = "";
 
-// Cache da última lista vinda da API (/faturas)
+// Cache da última lista vinda da API
 let ultimaListaFaturas = [];
 
 // ============ HELPERS ============
 
-// Converte número em moeda BR
 function formatCurrency(valor) {
   if (valor === null || valor === undefined) return "R$ 0,00";
   const n = Number(valor) || 0;
@@ -27,265 +26,207 @@ function formatCurrency(valor) {
   });
 }
 
-// Parse de data YYYY-MM-DD como data LOCAL (sem problema de fuso)
+// converte string ISO (yyyy-mm-dd ou data completa) pra Date LOCAL
 function parseISODateLocal(isoDate) {
   if (!isoDate) return null;
 
-  // Formato só data: 2025-12-17
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
     const [y, m, d] = isoDate.split("-").map(Number);
-    return new Date(y, m - 1, d); // ano, mês-1, dia (data local)
+    return new Date(y, m - 1, d);
   }
 
   const d = new Date(isoDate);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// Formata data para dd/mm/aaaa sem perder 1 dia
+// dd/mm/aaaa
 function formatDate(isoDate) {
   if (!isoDate) return "";
-
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
     const [y, m, d] = isoDate.split("-");
     return `${d}/${m}/${y}`;
   }
-
   const d = new Date(isoDate);
   if (Number.isNaN(d.getTime())) return isoDate;
   return d.toLocaleDateString("pt-BR");
 }
 
-// =====================
-// DASHBOARD / RESUMOS
-// =====================
+// ============ DASHBOARD ============
 
-// Essa função recebe a lista já filtrada (lista exibida na aba Faturas)
-// e calcula TUDO: cards do dashboard, cards das faturas,
-// resumo por transportadora e backlog.
-function atualizarResumosComBaseNaLista(lista) {
-  // Guarda a referência de todos elementos que vamos usar, com segurança
-  const cardTotal = document.getElementById("cardTotal");
-  const cardPendentes = document.getElementById("cardPendentes");
-  const cardAtrasadas = document.getElementById("cardAtrasadas");
-  const cardEmDia = document.getElementById("cardEmDia");
-
-  const fatTotalEl = document.getElementById("fatTotal");
-  const fatPendentesEl = document.getElementById("fatPendentes");
-  const fatAtrasadasEl = document.getElementById("fatAtrasadas");
-  const fatPagasEl = document.getElementById("fatPagas");
-
-  const tabelaResumo = document.getElementById("tabelaResumoTransportadora");
-  const tbodyResumo = document.getElementById("tbodyResumoTransportadora");
-  const tabelaBacklog = document.getElementById("tabelaBacklog");
-
-  // Se não tem lista, zera tudo e sai
-  if (!Array.isArray(lista) || lista.length === 0) {
-    const zero = formatCurrency(0);
-
-    if (cardTotal) cardTotal.textContent = zero;
-    if (cardPendentes) cardPendentes.textContent = zero;
-    if (cardAtrasadas) cardAtrasadas.textContent = zero;
-    if (cardEmDia) cardEmDia.textContent = zero;
-
-    if (fatTotalEl) fatTotalEl.textContent = zero;
-    if (fatPendentesEl) fatPendentesEl.textContent = zero;
-    if (fatAtrasadasEl) fatAtrasadasEl.textContent = zero;
-    if (fatPagasEl) fatPagasEl.textContent = zero;
-
-    if (tbodyResumo) {
-      tbodyResumo.innerHTML = `
-        <tr><td colspan="4" style="text-align:center;padding:8px;">Sem dados.</td></tr>
-      `;
+async function carregarDashboard() {
+  try {
+    const params = new URLSearchParams();
+    if (filtroTransportadora) {
+      params.append("transportadora", filtroTransportadora);
     }
-    if (tabelaBacklog) {
-      tabelaBacklog.innerHTML = `
-        <tbody>
-          <tr><td style="text-align:center;padding:8px;">Sem backlog pendente.</td></tr>
-        </tbody>
-      `;
+    if (filtroVencimento) {
+      params.append("ate_vencimento", filtroVencimento);
     }
-    return;
+
+    // 1) Resumo geral (cards) via API
+    const urlResumo =
+      params.toString().length > 0
+        ? `${API_BASE}/dashboard/resumo?${params.toString()}`
+        : `${API_BASE}/dashboard/resumo`;
+
+    const respResumo = await fetch(urlResumo);
+    if (!respResumo.ok) throw new Error("Erro ao buscar resumo");
+
+    const dataResumo = await respResumo.json();
+
+    document.getElementById("cardTotal").textContent = formatCurrency(
+      dataResumo.total
+    );
+    document.getElementById("cardPendentes").textContent = formatCurrency(
+      dataResumo.pendentes
+    );
+    document.getElementById("cardAtrasadas").textContent = formatCurrency(
+      dataResumo.atrasadas
+    );
+    document.getElementById("cardEmDia").textContent = formatCurrency(
+      dataResumo.em_dia
+    );
+
+    // 2) Tabela "Resumo por transportadora" usando a lista de faturas
+    let lista = Array.isArray(ultimaListaFaturas)
+      ? [...ultimaListaFaturas]
+      : [];
+
+    if (lista.length === 0) {
+      const urlF =
+        params.toString().length > 0
+          ? `${API_BASE}/faturas?${params.toString()}`
+          : `${API_BASE}/faturas`;
+      const respFat = await fetch(urlF);
+      if (!respFat.ok) throw new Error("Erro ao buscar faturas");
+      lista = await respFat.json();
+    }
+
+    renderResumoDashboard(lista);
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar dashboard");
   }
+}
 
-  // -------- Cálculos gerais --------
-  let totalGeral = 0;
-  let totalPendentes = 0;
-  let totalAtrasadas = 0;
-  let totalEmDia = 0;
-  let totalPagas = 0;
+// monta tabela horizontal tipo backlog
+function renderResumoDashboard(lista) {
+  const thead = document.getElementById("theadResumoDashboard");
+  const tbody = document.getElementById("tbodyResumoDashboard");
+  if (!thead || !tbody) return;
 
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
   const hojeTime = hoje.getTime();
 
-  // Por transportadora + backlog (por data)
-  const mapaTransp = {}; // { nome: { atrasado, emDia, geral, porData: { 'yyyy-mm-dd': valor } } }
-  const datasSet = new Set(); // todas as datas de vencimento com pendências
-
+  // considerar só pendentes pra colunas de vencimento
+  const datasSet = new Set();
   lista.forEach((f) => {
-    const valor = Number(f.valor || 0);
-    totalGeral += valor;
-
-    const status = (f.status || "").toLowerCase();
-    const dVenc = parseISODateLocal(f.data_vencimento);
-    const vencTime =
-      dVenc && !Number.isNaN(dVenc.getTime())
-        ? dVenc.setHours(0, 0, 0, 0)
-        : null;
-
-    // Totais por status
-    if (status === "pago") {
-      totalPagas += valor;
-    }
-
-    if (status === "pendente") {
-      if (vencTime !== null) {
-        totalPendentes += valor;
-
-        if (vencTime < hojeTime) {
-          totalAtrasadas += valor;
-        } else {
-          totalEmDia += valor;
-        }
-      } else {
-        // Pendente sem data -> conta como pendente "em dia"
-        totalPendentes += valor;
-        totalEmDia += valor;
-      }
-    }
-
-    // ---- Por transportadora ----
-    const nomeTransp = f.transportadora || "Outros";
-    if (!mapaTransp[nomeTransp]) {
-      mapaTransp[nomeTransp] = {
-        atrasado: 0,
-        emDia: 0,
-        geral: 0,
-        porData: {}, // chave: 'yyyy-mm-dd' -> valor
-      };
-    }
-    const reg = mapaTransp[nomeTransp];
-    reg.geral += valor;
-
-    if (status === "pendente" && vencTime !== null) {
-      const dataKey = dVenc.toISOString().slice(0, 10);
-      datasSet.add(dataKey);
-
-      if (vencTime < hojeTime) {
-        reg.atrasado += valor;
-      } else {
-        reg.emDia += valor;
-      }
-
-      reg.porData[dataKey] = (reg.porData[dataKey] || 0) + valor;
+    if (
+      f.status &&
+      f.status.toLowerCase() === "pendente" &&
+      f.data_vencimento
+    ) {
+      datasSet.add(f.data_vencimento);
     }
   });
 
-  // -------- Atualiza cards (Dashboard + Faturas) --------
-  if (cardTotal) cardTotal.textContent = formatCurrency(totalGeral);
-  if (cardPendentes) cardPendentes.textContent = formatCurrency(totalPendentes);
-  if (cardAtrasadas) cardAtrasadas.textContent = formatCurrency(totalAtrasadas);
-  if (cardEmDia) cardEmDia.textContent = formatCurrency(totalEmDia);
+  const datas = Array.from(datasSet).sort(); // ISO já ordena
 
-  if (fatTotalEl) fatTotalEl.textContent = formatCurrency(totalGeral);
-  if (fatPendentesEl) fatPendentesEl.textContent = formatCurrency(totalPendentes);
-  if (fatAtrasadasEl) fatAtrasadasEl.textContent = formatCurrency(totalAtrasadas);
-  if (fatPagasEl) fatPagasEl.textContent = formatCurrency(totalPagas);
+  // Cabeçalho
+  let headerHtml = `
+    <tr>
+      <th>Transportadora</th>
+      <th>Total atrasado</th>
+      <th>Total em dia</th>
+      <th>Total geral</th>
+  `;
+  datas.forEach((d) => {
+    headerHtml += `<th>${formatDate(d)}</th>`;
+  });
+  headerHtml += "</tr>";
+  thead.innerHTML = headerHtml;
 
-  // -------- Resumo por transportadora --------
-  if (tabelaResumo && tbodyResumo) {
-    tbodyResumo.innerHTML = "";
-
-    let somaAtrasado = 0;
-    let somaEmDia = 0;
-    let somaGeral = 0;
-
-    const nomesOrdenados = Object.keys(mapaTransp).sort((a, b) =>
-      a.localeCompare(b)
-    );
-
-    if (nomesOrdenados.length === 0) {
-      tbodyResumo.innerHTML = `
-        <tr><td colspan="4" style="text-align:center;padding:8px;">Sem dados.</td></tr>
-      `;
-    } else {
-      nomesOrdenados.forEach((nome) => {
-        const reg = mapaTransp[nome];
-        somaAtrasado += reg.atrasado;
-        somaEmDia += reg.emDia;
-        somaGeral += reg.geral;
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${nome}</td>
-          <td>${formatCurrency(reg.atrasado)}</td>
-          <td>${formatCurrency(reg.emDia)}</td>
-          <td>${formatCurrency(reg.geral)}</td>
-        `;
-        tbodyResumo.appendChild(tr);
-      });
-
-      // Linha "Total geral"
-      const trTotal = document.createElement("tr");
-      trTotal.innerHTML = `
-        <td><strong>Total geral</strong></td>
-        <td><strong>${formatCurrency(somaAtrasado)}</strong></td>
-        <td><strong>${formatCurrency(somaEmDia)}</strong></td>
-        <td><strong>${formatCurrency(somaGeral)}</strong></td>
-      `;
-      tbodyResumo.appendChild(trTotal);
+  // Agrupar por transportadora
+  const grupos = {};
+  lista.forEach((f) => {
+    const transp = f.transportadora || "Sem nome";
+    if (!grupos[transp]) {
+      grupos[transp] = {
+        totalAtrasado: 0,
+        totalEmDia: 0,
+        totalGeral: 0,
+        porData: {},
+      };
     }
-  }
+    const valor = Number(f.valor || 0);
+    grupos[transp].totalGeral += valor;
 
-  // -------- Backlog por vencimento (horizontal) --------
-  if (tabelaBacklog) {
-    const datasOrdenadas = Array.from(datasSet).sort();
+    const status = (f.status || "").toLowerCase();
+    const d = parseISODateLocal(f.data_vencimento);
+    const vencTime = d ? d.getTime() : null;
 
-    if (datasOrdenadas.length === 0) {
-      tabelaBacklog.innerHTML = `
-        <tbody>
-          <tr><td style="text-align:center;padding:8px;">Sem backlog pendente.</td></tr>
-        </tbody>
-      `;
-    } else {
-      // Soma por data (todas transportadoras)
-      const totaisPorData = {};
-      datasOrdenadas.forEach((d) => {
-        totaisPorData[d] = 0;
-      });
-
-      Object.values(mapaTransp).forEach((reg) => {
-        Object.entries(reg.porData).forEach(([dataKey, valor]) => {
-          totaisPorData[dataKey] += valor;
-        });
-      });
-
-      // Monta a tabela
-      const thead = document.createElement("thead");
-      const tbody = document.createElement("tbody");
-
-      // Cabeçalho: "Backlog" + datas
-      const headerRow = document.createElement("tr");
-      let headerHTML = "<th>Backlog</th>";
-      datasOrdenadas.forEach((d) => {
-        headerHTML += `<th>${formatDate(d)}</th>`;
-      });
-      headerRow.innerHTML = headerHTML;
-      thead.appendChild(headerRow);
-
-      // Linha única com valores
-      const valoresRow = document.createElement("tr");
-      let valoresHTML = "<td>Valor pendente</td>";
-      datasOrdenadas.forEach((d) => {
-        valoresHTML += `<td>${formatCurrency(totaisPorData[d])}</td>`;
-      });
-      valoresRow.innerHTML = valoresHTML;
-      tbody.appendChild(valoresRow);
-
-      tabelaBacklog.innerHTML = "";
-      tabelaBacklog.appendChild(thead);
-      tabelaBacklog.appendChild(tbody);
+    if (status === "pendente" && vencTime !== null) {
+      if (vencTime < hojeTime) {
+        grupos[transp].totalAtrasado += valor;
+      } else {
+        grupos[transp].totalEmDia += valor;
+      }
+      const key = f.data_vencimento;
+      grupos[transp].porData[key] =
+        (grupos[transp].porData[key] || 0) + valor;
     }
+  });
+
+  tbody.innerHTML = "";
+
+  let totalGeralAtrasado = 0;
+  let totalGeralEmDia = 0;
+  let totalGeral = 0;
+  const totaisPorData = {};
+
+  Object.entries(grupos).forEach(([transp, g]) => {
+    const tr = document.createElement("tr");
+
+    totalGeralAtrasado += g.totalAtrasado;
+    totalGeralEmDia += g.totalEmDia;
+    totalGeral += g.totalGeral;
+
+    datas.forEach((d) => {
+      const v = g.porData[d] || 0;
+      totaisPorData[d] = (totaisPorData[d] || 0) + v;
+    });
+
+    let html = `
+      <td>${transp}</td>
+      <td>${formatCurrency(g.totalAtrasado)}</td>
+      <td>${formatCurrency(g.totalEmDia)}</td>
+      <td>${formatCurrency(g.totalGeral)}</td>
+    `;
+    datas.forEach((d) => {
+      const val = g.porData[d] || 0;
+      html += `<td>${val ? formatCurrency(val) : "-"}</td>`;
+    });
+
+    tr.innerHTML = html;
+    tbody.appendChild(tr);
+  });
+
+  // linha total
+  if (Object.keys(grupos).length > 0) {
+    const trTotal = document.createElement("tr");
+    let html = `
+      <td><strong>Total geral</strong></td>
+      <td><strong>${formatCurrency(totalGeralAtrasado)}</strong></td>
+      <td><strong>${formatCurrency(totalGeralEmDia)}</strong></td>
+      <td><strong>${formatCurrency(totalGeral)}</strong></td>
+    `;
+    datas.forEach((d) => {
+      const v = totaisPorData[d] || 0;
+      html += `<td><strong>${v ? formatCurrency(v) : "-"}</strong></td>`;
+    });
+    trTotal.innerHTML = html;
+    tbody.appendChild(trTotal);
   }
 }
 
@@ -315,6 +256,8 @@ async function carregarFaturas() {
     const faturas = await resp.json();
     ultimaListaFaturas = faturas;
     renderizarFaturas();
+    // também atualiza dashboard (cards + resumo por transp)
+    carregarDashboard();
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar faturas");
@@ -323,50 +266,83 @@ async function carregarFaturas() {
 
 function renderizarFaturas() {
   const tbody = document.getElementById("tbodyFaturas");
-  if (!tbody) return;
-
   tbody.innerHTML = "";
 
   let lista = Array.isArray(ultimaListaFaturas)
     ? [...ultimaListaFaturas]
     : [];
 
-  // Filtro por período só da aba Faturas
-  if (filtroDataInicioFaturas || filtroDataFimFaturas || filtroStatus) {
+  // Filtro período (apenas aba Faturas)
+  if (filtroDataInicioFaturas || filtroDataFimFaturas) {
     lista = lista.filter((f) => {
-      // STATUS
-      if (filtroStatus) {
-        const st = (f.status || "").toLowerCase();
-        if (st !== filtroStatus) return false;
+      if (!f.data_vencimento) return false;
+      const d = parseISODateLocal(f.data_vencimento);
+      if (!d) return false;
+      const time = d.setHours(0, 0, 0, 0);
+
+      if (filtroDataInicioFaturas) {
+        const dIni = parseISODateLocal(filtroDataInicioFaturas);
+        if (!dIni) return false;
+        const ini = dIni.setHours(0, 0, 0, 0);
+        if (time < ini) return false;
       }
-
-      if (filtroDataInicioFaturas || filtroDataFimFaturas) {
-        if (!f.data_vencimento) return false;
-        const d = parseISODateLocal(f.data_vencimento);
-        if (!d) return false;
-        const time = d.setHours(0, 0, 0, 0);
-
-        if (filtroDataInicioFaturas) {
-          const ini = parseISODateLocal(filtroDataInicioFaturas);
-          if (!ini) return false;
-          const tIni = ini.setHours(0, 0, 0, 0);
-          if (time < tIni) return false;
-        }
-        if (filtroDataFimFaturas) {
-          const fim = parseISODateLocal(filtroDataFimFaturas);
-          if (!fim) return false;
-          const tFim = fim.setHours(0, 0, 0, 0);
-          if (time > tFim) return false;
-        }
+      if (filtroDataFimFaturas) {
+        const dFim = parseISODateLocal(filtroDataFimFaturas);
+        if (!dFim) return false;
+        const fim = dFim.setHours(0, 0, 0, 0);
+        if (time > fim) return false;
       }
       return true;
     });
   }
 
-  // Primeiro: atualiza todos resumos (dashboard, faturas, transportadora, backlog)
-  atualizarResumosComBaseNaLista(lista);
+  // Filtro status (aba Faturas)
+  if (filtroStatus) {
+    const alvo = filtroStatus.toLowerCase();
+    lista = lista.filter(
+      (f) => (f.status || "").toLowerCase() === alvo
+    );
+  }
 
-  // Depois monta a tabela de faturas
+  // RESUMO (cards da aba Faturas)
+  let total = 0;
+  let pendentes = 0;
+  let atrasadas = 0;
+  let pagas = 0;
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const hojeTime = hoje.getTime();
+
+  lista.forEach((f) => {
+    const valor = Number(f.valor || 0);
+    total += valor;
+
+    const status = (f.status || "").toLowerCase();
+    const d = parseISODateLocal(f.data_vencimento);
+    const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
+
+    if (status === "pago") {
+      pagas += valor;
+    } else if (status === "pendente") {
+      if (vencTime !== null && vencTime < hojeTime) {
+        atrasadas += valor;
+      } else {
+        pendentes += valor;
+      }
+    } else if (status === "atrasado") {
+      atrasadas += valor;
+    }
+  });
+
+  document.getElementById("fatTotal").textContent = formatCurrency(total);
+  document.getElementById("fatPendentes").textContent =
+    formatCurrency(pendentes);
+  document.getElementById("fatAtrasadas").textContent =
+    formatCurrency(atrasadas);
+  document.getElementById("fatPagas").textContent = formatCurrency(pagas);
+
+  // TABELA
   if (lista.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -381,7 +357,6 @@ function renderizarFaturas() {
 
   lista.forEach((f) => {
     const tr = document.createElement("tr");
-
     tr.innerHTML = `
       <td>${f.id}</td>
       <td>${f.transportadora}</td>
@@ -439,6 +414,8 @@ document.addEventListener("click", () => {
     .forEach((m) => m.classList.remove("ativo"));
 });
 
+// ============ EXCLUIR / EDITAR / ANEXOS ============
+
 async function excluirFatura(id) {
   if (!confirm(`Excluir fatura ${id}?`)) return;
 
@@ -455,7 +432,6 @@ async function excluirFatura(id) {
 }
 
 function preencherFormularioEdicao(f) {
-  // Vai pra aba Cadastro já com os dados
   ativarAba("cadastro");
   document.getElementById("inputTransportadora").value = f.transportadora;
   document.getElementById("inputNumeroFatura").value = f.numero_fatura;
@@ -463,11 +439,8 @@ function preencherFormularioEdicao(f) {
   document.getElementById("inputVencimento").value = f.data_vencimento;
   document.getElementById("inputStatus").value = f.status;
   document.getElementById("inputObservacao").value = f.observacao ?? "";
-
   document.getElementById("formFatura").dataset.editId = f.id;
 }
-
-// ============ ANEXOS (MODAL) ============
 
 async function abrirModalAnexos(faturaId) {
   document.getElementById("modalFaturaId").textContent = faturaId;
@@ -479,7 +452,7 @@ async function abrirModalAnexos(faturaId) {
     if (!resp.ok) throw new Error("Erro ao listar anexos");
     const anexos = await resp.json();
 
-    if (anexos.length === 0) {
+    if (!anexos.length) {
       lista.innerHTML = "<li>Sem anexos.</li>";
     } else {
       lista.innerHTML = "";
@@ -534,14 +507,11 @@ async function salvarFatura(e) {
       });
     }
 
-    if (!resp.ok) {
-      console.log("Status ao salvar:", resp.status);
-      throw new Error("Erro ao salvar fatura");
-    }
+    if (!resp.ok) throw new Error("Erro ao salvar fatura");
 
     const fatura = await resp.json();
 
-    // Envio de anexos (se tiver)
+    // upload anexos, se houver
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos.files.length > 0) {
       const fd = new FormData();
@@ -639,14 +609,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const filtroVencInput = document.getElementById("filtroVencimento");
     if (filtroVencInput) filtroVencInput.value = "";
-
     const buscaNumero = document.getElementById("buscaNumero");
     if (buscaNumero) buscaNumero.value = "";
-
     const ini = document.getElementById("filtroDataInicioFaturas");
     const fim = document.getElementById("filtroDataFimFaturas");
     if (ini) ini.value = "";
     if (fim) fim.value = "";
+    const statusSelect = document.getElementById("filtroStatus");
+    if (statusSelect) statusSelect.value = "";
 
     document
       .querySelectorAll(".transportadora-btn")
@@ -689,11 +659,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (filtroVencInput) filtroVencInput.value = "";
       const buscaNumero = document.getElementById("buscaNumero");
       if (buscaNumero) buscaNumero.value = "";
-
       const ini = document.getElementById("filtroDataInicioFaturas");
       const fim = document.getElementById("filtroDataFimFaturas");
       if (ini) ini.value = "";
       if (fim) fim.value = "";
+      const statusSelect = document.getElementById("filtroStatus");
+      if (statusSelect) statusSelect.value = "";
 
       carregarFaturas();
     });
@@ -724,12 +695,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // (Opcional futuro) filtroStatus, se você quiser adicionar no HTML:
+  // Filtro por STATUS (aba faturas)
   const statusSelect = document.getElementById("filtroStatus");
   if (statusSelect) {
     statusSelect.addEventListener("change", (e) => {
       filtroStatus = e.target.value;
       renderizarFaturas();
+    });
+  }
+
+  // Atualizar lista manualmente
+  const btnAtualizar = document.getElementById("btnAtualizarFaturas");
+  if (btnAtualizar) {
+    btnAtualizar.addEventListener("click", (e) => {
+      e.preventDefault();
+      carregarFaturas();
     });
   }
 
@@ -754,6 +734,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Primeira carga (dashboard + faturas usam a mesma lista)
+  // Primeira carga
   carregarFaturas();
 });
