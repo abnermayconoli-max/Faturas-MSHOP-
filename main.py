@@ -1,4 +1,4 @@
- from datetime import date, datetime
+from datetime import date, datetime
 import os
 import uuid
 from typing import List, Optional
@@ -51,7 +51,7 @@ os.makedirs(ANEXOS_DIR, exist_ok=True)
 
 
 class FaturaDB(Base):
-    _tablename_ = "faturas"
+    __tablename__ = "faturas"
 
     id = Column(Integer, primary_key=True, index=True)
     transportadora = Column(String, index=True)
@@ -72,7 +72,7 @@ class FaturaDB(Base):
 
 
 class AnexoDB(Base):
-    _tablename_ = "anexos"
+    __tablename__ = "anexos"
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
