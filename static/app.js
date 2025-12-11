@@ -128,14 +128,15 @@ function renderResumoDashboard(lista) {
   proxQuarta.setHours(0, 0, 0, 0);
   const proxQuartaTime = proxQuarta.getTime();
 
-  // considerar só pendentes pra colunas de vencimento
+  // ============================
+  // COLETAR TODAS AS DATAS COM
+  // STATUS PENDENTE OU ATRASADO
+  // ============================
   const datasSet = new Set();
   lista.forEach((f) => {
-    if (
-      f.status &&
-      f.status.toLowerCase() === "pendente" &&
-      f.data_vencimento
-    ) {
+    if (!f.data_vencimento || !f.status) return;
+    const st = f.status.toLowerCase();
+    if (st === "pendente" || st === "atrasado") {
       datasSet.add(f.data_vencimento);
     }
   });
@@ -175,19 +176,27 @@ function renderResumoDashboard(lista) {
     const d = parseISODateLocal(f.data_vencimento);
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
-    if (status === "pendente" && vencTime !== null) {
-      // Mesma regra do backend:
-      // - atrasado: vencimento < próxima quarta
-      // - em dia:  vencimento == próxima quarta
+    // Ignora pagos no backlog
+    if (status === "pago" || vencTime === null) return;
+
+    // Soma nas datas (colunas) para pendentes + atrasados
+    const key = f.data_vencimento;
+    grupos[transp].porData[key] =
+      (grupos[transp].porData[key] || 0) + valor;
+
+    // Regra dos totais:
+    // - status "atrasado" entra direto em atrasado
+    // - status "pendente":
+    //     atrasado  -> venc < proxQuarta
+    //     em dia    -> venc == proxQuarta
+    if (status === "atrasado") {
+      grupos[transp].totalAtrasado += valor;
+    } else if (status === "pendente") {
       if (vencTime < proxQuartaTime) {
         grupos[transp].totalAtrasado += valor;
       } else if (vencTime === proxQuartaTime) {
         grupos[transp].totalEmDia += valor;
       }
-
-      const key = f.data_vencimento;
-      grupos[transp].porData[key] =
-        (grupos[transp].porData[key] || 0) + valor;
     }
   });
 
@@ -352,7 +361,6 @@ function renderizarFaturas() {
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
-      // mesma regra do backend:
       // atrasadas = pendentes com vencimento < próxima quarta
       // pendentes = pendentes com vencimento >= próxima quarta
       if (vencTime !== null && vencTime < proxQuartaTime) {
