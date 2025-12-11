@@ -317,15 +317,29 @@ function renderizarFaturas() {
     );
   }
 
-  // RESUMO (cards da aba Faturas) -> aqui continua regra "hoje"
+  // ========= RESUMO (cards da aba Faturas) COM REGRA DA PRÓXIMA QUARTA =========
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
   let pagas = 0;
 
+  // Hoje zerado
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
-  const hojeTime = hoje.getTime();
+
+  // Mesma lógica do backend (Python) para achar a PRÓXIMA quarta-feira
+  const jsDay = hoje.getDay();        // 0..6 (dom=0)
+  const weekday = (jsDay + 6) % 7;    // seg=0, ter=1, qua=2, ...
+
+  let diasAteQuarta = (2 - weekday) % 7; // 2 = quarta
+  if (diasAteQuarta <= 0) {
+    diasAteQuarta += 7;               // sempre próxima quarta
+  }
+
+  const proxQuarta = new Date(hoje);
+  proxQuarta.setDate(proxQuarta.getDate() + diasAteQuarta);
+  proxQuarta.setHours(0, 0, 0, 0);
+  const proxQuartaTime = proxQuarta.getTime();
 
   lista.forEach((f) => {
     const valor = Number(f.valor || 0);
@@ -338,7 +352,10 @@ function renderizarFaturas() {
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
-      if (vencTime !== null && vencTime < hojeTime) {
+      // mesma regra do backend:
+      // atrasadas = pendentes com vencimento < próxima quarta
+      // pendentes = pendentes com vencimento >= próxima quarta
+      if (vencTime !== null && vencTime < proxQuartaTime) {
         atrasadas += valor;
       } else {
         pendentes += valor;
@@ -354,6 +371,7 @@ function renderizarFaturas() {
   document.getElementById("fatAtrasadas").textContent =
     formatCurrency(atrasadas);
   document.getElementById("fatPagas").textContent = formatCurrency(pagas);
+  // ===================== FIM RESUMO FATURAS =====================
 
   // TABELA
   if (lista.length === 0) {
