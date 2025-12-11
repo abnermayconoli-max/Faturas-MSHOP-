@@ -230,7 +230,7 @@ button.primary {
 }
 
 button.primary:hover {
-  background: #22c55e;
+ 背景: #22c55e;
   border-color: #22c55e;
 }
 
@@ -268,6 +268,16 @@ button.secondary:hover {
   color: #9ca3af;
 }
 
+/* NOVO: select de status no header */
+.field-group select {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
 #buscaNumero {
   min-width: 220px;
   border-radius: 999px;
@@ -294,16 +304,6 @@ button.secondary:hover {
 .filtros-actions {
   display: flex;
   gap: 8px;
-}
-
-/* select nos filtros (caso use depois) */
-.field-group select {
-  border-radius: 999px;
-  border: 1px solid #1f2937;
-  background: #020617;
-  color: #e5e7eb;
-  padding: 8px 12px;
-  font-size: 14px;
 }
 
 /* ========== TABELA ========== */
@@ -455,15 +455,4 @@ button.secondary:hover {
 
 #listaAnexos a:hover {
   text-decoration: underline;
-}
-
-/* ========== DASHBOARD - RESUMO POR TRANSPORTADORA ========== */
-
-#dashboardSection .table-section {
-  margin-top: 24px;
-}
-
-.resumo-total-row {
-  background: #111827;
-  font-weight: 600;
 }
