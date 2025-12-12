@@ -1,7 +1,9 @@
 // URL base (vazio = mesmo domínio)
 const API_BASE = "";
 
-// Estado de filtros globais
+// ============ ESTADO (FILTROS) ============
+
+// Filtros globais (sidebar + busca)
 let filtroTransportadora = "";
 let filtroVencimento = "";
 let filtroNumeroFatura = "";
@@ -56,12 +58,8 @@ function formatDate(isoDate) {
 async function carregarDashboard() {
   try {
     const params = new URLSearchParams();
-    if (filtroTransportadora) {
-      params.append("transportadora", filtroTransportadora);
-    }
-    if (filtroVencimento) {
-      params.append("ate_vencimento", filtroVencimento);
-    }
+    if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
 
     // 1) Resumo geral (cards) via API
     const urlResumo =
@@ -74,29 +72,20 @@ async function carregarDashboard() {
 
     const dataResumo = await respResumo.json();
 
-    document.getElementById("cardTotal").textContent = formatCurrency(
-      dataResumo.total
-    );
-    document.getElementById("cardPendentes").textContent = formatCurrency(
-      dataResumo.pendentes
-    );
-    document.getElementById("cardAtrasadas").textContent = formatCurrency(
-      dataResumo.atrasadas
-    );
-    document.getElementById("cardEmDia").textContent = formatCurrency(
-      dataResumo.em_dia
-    );
+    document.getElementById("cardTotal").textContent = formatCurrency(dataResumo.total);
+    document.getElementById("cardPendentes").textContent = formatCurrency(dataResumo.pendentes);
+    document.getElementById("cardAtrasadas").textContent = formatCurrency(dataResumo.atrasadas);
+    document.getElementById("cardEmDia").textContent = formatCurrency(dataResumo.em_dia);
 
     // 2) Tabela "Resumo por transportadora" usando a lista de faturas
-    let lista = Array.isArray(ultimaListaFaturas)
-      ? [...ultimaListaFaturas]
-      : [];
+    let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
     if (lista.length === 0) {
       const urlF =
         params.toString().length > 0
           ? `${API_BASE}/faturas?${params.toString()}`
           : `${API_BASE}/faturas`;
+
       const respFat = await fetch(urlF);
       if (!respFat.ok) throw new Error("Erro ao buscar faturas");
       lista = await respFat.json();
@@ -123,6 +112,7 @@ function renderResumoDashboard(lista) {
   const weekday = hoje.getDay();
   let diasAteQuarta = (3 - weekday + 7) % 7;
   if (diasAteQuarta === 0) diasAteQuarta = 7;
+
   const proxQuarta = new Date(hoje);
   proxQuarta.setDate(hoje.getDate() + diasAteQuarta);
   proxQuarta.setHours(0, 0, 0, 0);
@@ -170,9 +160,7 @@ function renderResumoDashboard(lista) {
     const statusLower = (f.status || "").toLowerCase();
 
     // Só conta no dashboard se não estiver pago
-    if (statusLower === "pago") {
-      return;
-    }
+    if (statusLower === "pago") return;
 
     grupos[transp].totalGeral += valor;
 
@@ -180,11 +168,6 @@ function renderResumoDashboard(lista) {
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
     if (vencTime !== null) {
-      // Regras de classificação:
-      // - status "atrasado" => sempre vai pra Total atrasado
-      // - status "pendente":
-      //      venc < proxQuarta -> atrasado
-      //      venc == proxQuarta -> em dia
       if (statusLower === "atrasado") {
         grupos[transp].totalAtrasado += valor;
       } else if (statusLower === "pendente") {
@@ -197,8 +180,7 @@ function renderResumoDashboard(lista) {
     }
 
     const key = f.data_vencimento;
-    grupos[transp].porData[key] =
-      (grupos[transp].porData[key] || 0) + valor;
+    grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
   });
 
   tbody.innerHTML = "";
@@ -258,15 +240,9 @@ function renderResumoDashboard(lista) {
 async function carregarFaturas() {
   try {
     const params = new URLSearchParams();
-    if (filtroTransportadora) {
-      params.append("transportadora", filtroTransportadora);
-    }
-    if (filtroVencimento) {
-      params.append("ate_vencimento", filtroVencimento);
-    }
-    if (filtroNumeroFatura) {
-      params.append("numero_fatura", filtroNumeroFatura);
-    }
+    if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
+    if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
 
     const url =
       params.toString().length > 0
@@ -278,8 +254,8 @@ async function carregarFaturas() {
 
     const faturas = await resp.json();
     ultimaListaFaturas = faturas;
+
     renderizarFaturas();
-    // também atualiza dashboard (cards + resumo por transp)
     carregarDashboard();
   } catch (err) {
     console.error(err);
@@ -289,11 +265,11 @@ async function carregarFaturas() {
 
 function renderizarFaturas() {
   const tbody = document.getElementById("tbodyFaturas");
+  if (!tbody) return;
+
   tbody.innerHTML = "";
 
-  let lista = Array.isArray(ultimaListaFaturas)
-    ? [...ultimaListaFaturas]
-    : [];
+  let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
   // Filtro período (apenas aba Faturas)
   if (filtroDataInicioFaturas || filtroDataFimFaturas) {
@@ -309,12 +285,14 @@ function renderizarFaturas() {
         const ini = dIni.setHours(0, 0, 0, 0);
         if (time < ini) return false;
       }
+
       if (filtroDataFimFaturas) {
         const dFim = parseISODateLocal(filtroDataFimFaturas);
         if (!dFim) return false;
         const fim = dFim.setHours(0, 0, 0, 0);
         if (time > fim) return false;
       }
+
       return true;
     });
   }
@@ -325,7 +303,7 @@ function renderizarFaturas() {
     lista = lista.filter((f) => (f.status || "").toLowerCase() === alvo);
   }
 
-  // RESUMO (cards da aba Faturas) -> aqui continua regra "hoje"
+  // RESUMO (cards da aba Faturas)
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
@@ -346,22 +324,21 @@ function renderizarFaturas() {
     if (status === "pago") {
       pagas += valor;
     } else if (status === "pendente") {
-      if (vencTime !== null && vencTime < hojeTime) {
-        atrasadas += valor;
-      } else {
-        pendentes += valor;
-      }
+      if (vencTime !== null && vencTime < hojeTime) atrasadas += valor;
+      else pendentes += valor;
     } else if (status === "atrasado") {
       atrasadas += valor;
     }
   });
 
-  document.getElementById("fatTotal").textContent = formatCurrency(total);
-  document.getElementById("fatPendentes").textContent =
-    formatCurrency(pendentes);
-  document.getElementById("fatAtrasadas").textContent =
-    formatCurrency(atrasadas);
-  document.getElementById("fatPagas").textContent = formatCurrency(pagas);
+  const elTotal = document.getElementById("fatTotal");
+  const elPend = document.getElementById("fatPendentes");
+  const elAtr = document.getElementById("fatAtrasadas");
+  const elPag = document.getElementById("fatPagas");
+  if (elTotal) elTotal.textContent = formatCurrency(total);
+  if (elPend) elPend.textContent = formatCurrency(pendentes);
+  if (elAtr) elAtr.textContent = formatCurrency(atrasadas);
+  if (elPag) elPag.textContent = formatCurrency(pagas);
 
   // TABELA
   if (lista.length === 0) {
@@ -376,11 +353,10 @@ function renderizarFaturas() {
     return;
   }
 
+  // IMPORTANTE: sem listeners por linha — só render
   lista.forEach((f) => {
     const tr = document.createElement("tr");
-
-    // >>> ALTERAÇÃO: guardar o id no TR para o clique funcionar mesmo com pesquisa
-    tr.dataset.faturaId = f.id;
+    tr.dataset.faturaId = f.id; // <- chave para funcionar com pesquisa
 
     tr.innerHTML = `
       <td>${f.id}</td>
@@ -392,58 +368,62 @@ function renderizarFaturas() {
       <td>${f.status}</td>
       <td>${f.observacao ?? ""}</td>
       <td class="acoes">
-        <button type="button" class="menu-btn">⋮</button>
+        <button type="button" class="menu-btn" aria-label="Ações">⋮</button>
         <div class="menu-dropdown">
-          <button data-acao="editar">Editar</button>
-          <button data-acao="excluir">Excluir</button>
-          <button data-acao="anexos">Anexos</button>
+          <button type="button" data-acao="editar">Editar</button>
+          <button type="button" data-acao="excluir">Excluir</button>
+          <button type="button" data-acao="anexos">Anexos</button>
         </div>
       </td>
     `;
 
-    // >>> ALTERAÇÃO: removi listeners por linha (isso quebrava após pesquisa/re-render)
     tbody.appendChild(tr);
   });
 }
 
-// ============ ALTERAÇÃO PRINCIPAL: EVENT DELEGATION NO TBODY ============
+// ============ MENU 3 PONTINHOS (DELEGAÇÃO) ============
 
-// 1) Clique no ⋮ e nos itens do dropdown (funciona com pesquisa e sem pesquisa)
-document.addEventListener("DOMContentLoaded", () => {
+function fecharTodosMenus() {
+  document.querySelectorAll(".menu-dropdown.ativo").forEach((m) => {
+    m.classList.remove("ativo");
+  });
+}
+
+function setupMenuDelegation() {
   const tbody = document.getElementById("tbodyFaturas");
   if (!tbody) return;
 
+  // clique no tbody (serve pra abrir menu e clicar nas ações)
   tbody.addEventListener("click", async (e) => {
-    const btnMenu = e.target.closest(".menu-btn");
-    const btnAcao = e.target.closest(".menu-dropdown button[data-acao]");
+    const menuBtn = e.target.closest(".menu-btn");
+    const acaoBtn = e.target.closest(".menu-dropdown button[data-acao]");
 
     // abrir/fechar menu
-    if (btnMenu) {
-      e.stopPropagation();
+    if (menuBtn) {
       e.preventDefault();
+      e.stopPropagation();
 
-      document
-        .querySelectorAll(".menu-dropdown.ativo")
-        .forEach((m) => m.classList.remove("ativo"));
+      fecharTodosMenus();
 
-      const dropdown = btnMenu.parentElement.querySelector(".menu-dropdown");
+      const acoesCell = menuBtn.closest(".acoes");
+      const dropdown = acoesCell ? acoesCell.querySelector(".menu-dropdown") : null;
       if (dropdown) dropdown.classList.toggle("ativo");
       return;
     }
 
-    // clique em ação do menu
-    if (btnAcao) {
-      e.stopPropagation();
+    // clicar em uma ação do dropdown
+    if (acaoBtn) {
       e.preventDefault();
+      e.stopPropagation();
 
-      const acao = btnAcao.dataset.acao;
-      const tr = btnAcao.closest("tr");
+      const acao = acaoBtn.dataset.acao;
+      const tr = acaoBtn.closest("tr");
       const id = tr ? tr.dataset.faturaId : null;
-
       if (!id) return;
 
-      // encontrar objeto da fatura (mesmo após pesquisa)
-      const faturaObj = (ultimaListaFaturas || []).find((f) => String(f.id) === String(id));
+      const faturaObj = (ultimaListaFaturas || []).find(
+        (f) => String(f.id) === String(id)
+      );
 
       if (acao === "excluir") {
         await excluirFatura(id);
@@ -453,20 +433,18 @@ document.addEventListener("DOMContentLoaded", () => {
         abrirModalAnexos(id);
       }
 
-      // fechar dropdown após ação
-      document
-        .querySelectorAll(".menu-dropdown.ativo")
-        .forEach((m) => m.classList.remove("ativo"));
+      fecharTodosMenus();
     }
   });
-});
 
-// Fechar menus se clicar fora
-document.addEventListener("click", () => {
-  document
-    .querySelectorAll(".menu-dropdown.ativo")
-    .forEach((m) => m.classList.remove("ativo"));
-});
+  // clique fora fecha
+  document.addEventListener("click", () => fecharTodosMenus());
+
+  // ESC fecha
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") fecharTodosMenus();
+  });
+}
 
 // ============ EXCLUIR / EDITAR / ANEXOS ============
 
@@ -474,9 +452,7 @@ async function excluirFatura(id) {
   if (!confirm(`Excluir fatura ${id}?`)) return;
 
   try {
-    const resp = await fetch(`${API_BASE}/faturas/${id}`, {
-      method: "DELETE",
-    });
+    const resp = await fetch(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
     if (!resp.ok) throw new Error("Erro ao excluir");
     await carregarFaturas();
   } catch (err) {
@@ -547,6 +523,7 @@ async function salvarFatura(e) {
 
   try {
     let resp;
+
     if (editId) {
       resp = await fetch(`${API_BASE}/faturas/${editId}`, {
         method: "PUT",
@@ -567,22 +544,23 @@ async function salvarFatura(e) {
 
     // upload anexos, se houver
     const inputAnexos = document.getElementById("inputAnexos");
-    if (inputAnexos.files.length > 0) {
+    if (inputAnexos && inputAnexos.files && inputAnexos.files.length > 0) {
       const fd = new FormData();
       for (const file of inputAnexos.files) {
         fd.append("files", file);
       }
+
       const respAnexos = await fetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
         method: "POST",
         body: fd,
       });
-      if (!respAnexos.ok) {
-        console.error("Erro ao enviar anexos");
-      }
+
+      if (!respAnexos.ok) console.error("Erro ao enviar anexos");
     }
 
     form.reset();
     delete form.dataset.editId;
+
     await carregarFaturas();
     ativarAba("faturas");
   } catch (err) {
@@ -620,12 +598,8 @@ function ativarAba(aba) {
 
 function exportarExcel() {
   const params = new URLSearchParams();
-  if (filtroTransportadora) {
-    params.append("transportadora", filtroTransportadora);
-  }
-  if (filtroNumeroFatura) {
-    params.append("numero_fatura", filtroNumeroFatura);
-  }
+  if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+  if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
 
   const url =
     params.toString().length > 0
@@ -638,16 +612,13 @@ function exportarExcel() {
 // ============ INIT ============
 
 document.addEventListener("DOMContentLoaded", () => {
+  // setup do menu 3 pontinhos (IMPORTANTE)
+  setupMenuDelegation();
+
   // Abas
-  document.getElementById("tabDashboard").addEventListener("click", () =>
-    ativarAba("dashboard")
-  );
-  document.getElementById("tabCadastro").addEventListener("click", () =>
-    ativarAba("cadastro")
-  );
-  document.getElementById("tabFaturas").addEventListener("click", () =>
-    ativarAba("faturas")
-  );
+  document.getElementById("tabDashboard").addEventListener("click", () => ativarAba("dashboard"));
+  document.getElementById("tabCadastro").addEventListener("click", () => ativarAba("cadastro"));
+  document.getElementById("tabFaturas").addEventListener("click", () => ativarAba("faturas"));
 
   // Botão página inicial
   document.getElementById("btnHome").addEventListener("click", () => {
@@ -660,18 +631,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const filtroVencInput = document.getElementById("filtroVencimento");
     if (filtroVencInput) filtroVencInput.value = "";
+
     const buscaNumero = document.getElementById("buscaNumero");
     if (buscaNumero) buscaNumero.value = "";
+
     const ini = document.getElementById("filtroDataInicioFaturas");
     const fim = document.getElementById("filtroDataFimFaturas");
     if (ini) ini.value = "";
     if (fim) fim.value = "";
+
     const statusSelect = document.getElementById("filtroStatus");
     if (statusSelect) statusSelect.value = "";
 
-    document
-      .querySelectorAll(".transportadora-btn")
-      .forEach((b) => b.classList.remove("selected"));
+    document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
 
     ativarAba("dashboard");
     carregarFaturas();
@@ -681,9 +653,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".transportadora-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       filtroTransportadora = btn.dataset.transportadora || "";
-      document
-        .querySelectorAll(".transportadora-btn")
-        .forEach((b) => b.classList.remove("selected"));
+      document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       carregarFaturas();
     })
@@ -698,6 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Limpar filtros
   const btnLimparFiltros = document.getElementById("btnLimparFiltros");
   if (btnLimparFiltros) {
     btnLimparFiltros.addEventListener("click", () => {
@@ -710,10 +681,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (filtroVencInput) filtroVencInput.value = "";
       const buscaNumero = document.getElementById("buscaNumero");
       if (buscaNumero) buscaNumero.value = "";
+
       const ini = document.getElementById("filtroDataInicioFaturas");
       const fim = document.getElementById("filtroDataFimFaturas");
       if (ini) ini.value = "";
       if (fim) fim.value = "";
+
       const statusSelect = document.getElementById("filtroStatus");
       if (statusSelect) statusSelect.value = "";
 
@@ -721,7 +694,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Busca nº fatura
+  // Busca nº fatura (pesquisa)
   const buscaNumero = document.getElementById("buscaNumero");
   if (buscaNumero) {
     buscaNumero.addEventListener("input", (e) => {
@@ -766,19 +739,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Exportar Excel
   const btnExportar = document.getElementById("btnExportarExcel");
-  if (btnExportar) {
-    btnExportar.addEventListener("click", exportarExcel);
-  }
+  if (btnExportar) btnExportar.addEventListener("click", exportarExcel);
 
   // Formulário
   document.getElementById("formFatura").addEventListener("submit", salvarFatura);
 
   // Modal anexos
-  document
-    .getElementById("modalFechar")
-    .addEventListener("click", () =>
-      document.getElementById("modalAnexos").classList.remove("open")
-    );
+  document.getElementById("modalFechar").addEventListener("click", () =>
+    document.getElementById("modalAnexos").classList.remove("open")
+  );
   document.getElementById("modalAnexos").addEventListener("click", (e) => {
     if (e.target.id === "modalAnexos") {
       document.getElementById("modalAnexos").classList.remove("open");
