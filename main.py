@@ -370,6 +370,26 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
     )
 
 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# >>> NOVO: EXCLUIR ANEXO (BOTÃO NO MODAL VAI USAR) <<<
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+@app.delete("/anexos/{anexo_id}")
+def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
+    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
+    if not anexo:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+
+    # apaga o arquivo físico
+    caminho = os.path.join(ANEXOS_DIR, anexo.filename)
+    if os.path.exists(caminho):
+        os.remove(caminho)
+
+    # apaga do banco
+    db.delete(anexo)
+    db.commit()
+    return {"ok": True}
+
+
 # =========================
 # DASHBOARD / EXPORT
 # =========================
