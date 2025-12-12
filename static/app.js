@@ -132,10 +132,7 @@ function renderResumoDashboard(lista) {
   const datasSet = new Set();
   lista.forEach((f) => {
     const statusLower = (f.status || "").toLowerCase();
-    if (
-      statusLower !== "pago" && // só abertas
-      f.data_vencimento
-    ) {
+    if (statusLower !== "pago" && f.data_vencimento) {
       datasSet.add(f.data_vencimento);
     }
   });
@@ -325,9 +322,7 @@ function renderizarFaturas() {
   // Filtro status (aba Faturas)
   if (filtroStatus) {
     const alvo = filtroStatus.toLowerCase();
-    lista = lista.filter(
-      (f) => (f.status || "").toLowerCase() === alvo
-    );
+    lista = lista.filter((f) => (f.status || "").toLowerCase() === alvo);
   }
 
   // RESUMO (cards da aba Faturas) -> aqui continua regra "hoje"
@@ -383,6 +378,10 @@ function renderizarFaturas() {
 
   lista.forEach((f) => {
     const tr = document.createElement("tr");
+
+    // >>> ALTERAÇÃO: guardar o id no TR para o clique funcionar mesmo com pesquisa
+    tr.dataset.faturaId = f.id;
+
     tr.innerHTML = `
       <td>${f.id}</td>
       <td>${f.transportadora}</td>
@@ -402,36 +401,65 @@ function renderizarFaturas() {
       </td>
     `;
 
-    const menuBtn = tr.querySelector(".menu-btn");
-    const dropdown = tr.querySelector(".menu-dropdown");
-
-    menuBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      document
-        .querySelectorAll(".menu-dropdown.ativo")
-        .forEach((m) => m.classList.remove("ativo"));
-      dropdown.classList.toggle("ativo");
-    });
-
-    dropdown.addEventListener("click", async (e) => {
-      const acao = e.target.dataset.acao;
-      if (!acao) return;
-
-      if (acao === "excluir") {
-        await excluirFatura(f.id);
-      } else if (acao === "editar") {
-        preencherFormularioEdicao(f);
-      } else if (acao === "anexos") {
-        abrirModalAnexos(f.id);
-      }
-
-      dropdown.classList.remove("ativo");
-    });
-
+    // >>> ALTERAÇÃO: removi listeners por linha (isso quebrava após pesquisa/re-render)
     tbody.appendChild(tr);
   });
 }
+
+// ============ ALTERAÇÃO PRINCIPAL: EVENT DELEGATION NO TBODY ============
+
+// 1) Clique no ⋮ e nos itens do dropdown (funciona com pesquisa e sem pesquisa)
+document.addEventListener("DOMContentLoaded", () => {
+  const tbody = document.getElementById("tbodyFaturas");
+  if (!tbody) return;
+
+  tbody.addEventListener("click", async (e) => {
+    const btnMenu = e.target.closest(".menu-btn");
+    const btnAcao = e.target.closest(".menu-dropdown button[data-acao]");
+
+    // abrir/fechar menu
+    if (btnMenu) {
+      e.stopPropagation();
+      e.preventDefault();
+
+      document
+        .querySelectorAll(".menu-dropdown.ativo")
+        .forEach((m) => m.classList.remove("ativo"));
+
+      const dropdown = btnMenu.parentElement.querySelector(".menu-dropdown");
+      if (dropdown) dropdown.classList.toggle("ativo");
+      return;
+    }
+
+    // clique em ação do menu
+    if (btnAcao) {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const acao = btnAcao.dataset.acao;
+      const tr = btnAcao.closest("tr");
+      const id = tr ? tr.dataset.faturaId : null;
+
+      if (!id) return;
+
+      // encontrar objeto da fatura (mesmo após pesquisa)
+      const faturaObj = (ultimaListaFaturas || []).find((f) => String(f.id) === String(id));
+
+      if (acao === "excluir") {
+        await excluirFatura(id);
+      } else if (acao === "editar") {
+        if (faturaObj) preencherFormularioEdicao(faturaObj);
+      } else if (acao === "anexos") {
+        abrirModalAnexos(id);
+      }
+
+      // fechar dropdown após ação
+      document
+        .querySelectorAll(".menu-dropdown.ativo")
+        .forEach((m) => m.classList.remove("ativo"));
+    }
+  });
+});
 
 // Fechar menus se clicar fora
 document.addEventListener("click", () => {
@@ -544,13 +572,10 @@ async function salvarFatura(e) {
       for (const file of inputAnexos.files) {
         fd.append("files", file);
       }
-      const respAnexos = await fetch(
-        `${API_BASE}/faturas/${fatura.id}/anexos`,
-        {
-          method: "POST",
-          body: fd,
-        }
-      );
+      const respAnexos = await fetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
+        method: "POST",
+        body: fd,
+      });
       if (!respAnexos.ok) {
         console.error("Erro ao enviar anexos");
       }
