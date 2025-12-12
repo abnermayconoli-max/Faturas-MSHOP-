@@ -508,3 +508,22 @@ button.secondary:hover {
   font-weight: 600;
   background: #020617;
 }
+
+/* =========================================================
+   ✅ ALTERAÇÃO ADICIONADA (SEM MEXER NO RESTO)
+   Evita o menu ser "cortado" / ficar sem clique quando filtra/pesquisa
+   ========================================================= */
+
+.tabela {
+  position: relative;
+  z-index: 1;
+}
+
+.tabela td.acoes {
+  overflow: visible;
+  z-index: 99999;
+}
+
+.menu-dropdown {
+  z-index: 99999;
+}
