@@ -436,8 +436,14 @@ function setupMenuDelegation() {
     }
   });
 
-  // clique fora fecha
-  document.addEventListener("click", () => fecharTodosMenus());
+  // clique fora fecha (corrigido)
+document.addEventListener("click", (e) => {
+  // se clicou dentro do menu ou no botão, não fecha
+  if (e.target.closest(".menu-dropdown") || e.target.closest(".menu-btn")) {
+    return;
+  }
+  fecharTodosMenus();
+});
 
   // ESC fecha
   document.addEventListener("keydown", (e) => {
