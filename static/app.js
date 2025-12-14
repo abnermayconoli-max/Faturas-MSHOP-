@@ -386,6 +386,14 @@ function renderizarFaturas() {
 function fecharTodosMenus() {
   document.querySelectorAll(".menu-dropdown.ativo").forEach((m) => {
     m.classList.remove("ativo");
+    // reset das posições que vamos aplicar via JS
+    m.style.position = "";
+    m.style.left = "";
+    m.style.top = "";
+    m.style.right = "";
+    m.style.bottom = "";
+    m.style.maxHeight = "";
+    m.style.overflowY = "";
   });
 }
 
