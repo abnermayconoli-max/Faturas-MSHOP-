@@ -3,6 +3,10 @@ import os
 import uuid
 from typing import List, Optional
 
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
+
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -12,9 +16,11 @@ from fastapi import (
     Query,
     Request,
 )
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import StreamingResponse
+
 from pydantic import BaseModel
 from sqlalchemy import (
     create_engine,
@@ -35,7 +41,6 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 # =========================
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL não configurada nas variáveis de ambiente do Render.")
 
@@ -43,14 +48,37 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Pasta para anexos (no disco do container)
-ANEXOS_DIR = "anexos"
-os.makedirs(ANEXOS_DIR, exist_ok=True)
+# =========================
+# CONFIG R2 (S3 compatível)
+# =========================
+
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+R2_REGION = os.getenv("R2_REGION", "auto")
+
+def get_s3_client():
+    if not (R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL and R2_BUCKET_NAME):
+        raise RuntimeError(
+            "R2 não configurado. Defina R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL, R2_BUCKET_NAME."
+        )
+
+    # assinatura v4 e timeouts bons
+    cfg = Config(signature_version="s3v4")
+
+    return boto3.client(
+        "s3",
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        endpoint_url=R2_ENDPOINT_URL,
+        region_name=R2_REGION,
+        config=cfg,
+    )
 
 # =========================
 # MODELOS SQLALCHEMY
 # =========================
-
 
 class FaturaDB(Base):
     __tablename__ = "faturas"
@@ -76,21 +104,19 @@ class AnexoDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    filename = Column(String)       # nome salvo no disco
-    original_name = Column(String)  # nome que o usuário enviou
+    filename = Column(String)       # agora é a "key" do objeto no R2
+    original_name = Column(String)  # nome enviado
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
     fatura = relationship("FaturaDB", back_populates="anexos")
 
 
-# Cria tabelas (se não existirem)
 Base.metadata.create_all(bind=engine)
 
 # =========================
 # Pydantic
 # =========================
-
 
 class FaturaBase(BaseModel):
     transportadora: str
@@ -100,11 +126,8 @@ class FaturaBase(BaseModel):
     status: str = "pendente"
     observacao: Optional[str] = None
 
-
 class FaturaCreate(FaturaBase):
-    """Usado no POST /faturas"""
     pass
-
 
 class FaturaUpdate(BaseModel):
     transportadora: Optional[str] = None
@@ -114,7 +137,6 @@ class FaturaUpdate(BaseModel):
     status: Optional[str] = None
     observacao: Optional[str] = None
 
-
 class AnexoOut(BaseModel):
     id: int
     original_name: str
@@ -122,14 +144,12 @@ class AnexoOut(BaseModel):
     class Config:
         orm_mode = True
 
-
 class FaturaOut(FaturaBase):
     id: int
     responsavel: Optional[str] = None
 
     class Config:
         orm_mode = True
-
 
 # =========================
 # MAPEAMENTO RESPONSÁVEL
@@ -152,13 +172,11 @@ RESP_MAP = {
     "GLM - Larissa": "Larissa",
 }
 
-
 def get_responsavel(transportadora: str) -> Optional[str]:
     if transportadora in RESP_MAP:
         return RESP_MAP[transportadora]
     base = transportadora.split("-")[0].strip()
     return RESP_MAP.get(base)
-
 
 def fatura_to_out(f: FaturaDB) -> FaturaOut:
     return FaturaOut(
@@ -172,11 +190,9 @@ def fatura_to_out(f: FaturaDB) -> FaturaOut:
         responsavel=get_responsavel(f.transportadora),
     )
 
-
 # =========================
 # DEPENDÊNCIA DO BANCO
 # =========================
-
 
 def get_db():
     db = SessionLocal()
@@ -185,34 +201,26 @@ def get_db():
     finally:
         db.close()
 
-
 # =========================
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(
-    title="Sistema de Faturas Transportadoras",
-    version="0.6.0",
-)
+app = FastAPI(title="Sistema de Faturas Transportadoras", version="0.7.0")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-
 # =========================
 # ROTAS DE FATURAS - CRUD
 # =========================
-
 
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
@@ -232,7 +240,6 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     except Exception as e:
         print("ERRO AO CRIAR FATURA:", repr(e))
         raise HTTPException(status_code=400, detail="Erro ao criar fatura")
-
 
 @app.get("/faturas", response_model=List[FaturaOut])
 def listar_faturas(
@@ -260,7 +267,6 @@ def listar_faturas(
     faturas_db = query.all()
     return [fatura_to_out(f) for f in faturas_db]
 
-
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
 def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
@@ -268,19 +274,13 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
     return fatura_to_out(fatura)
 
-
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
-def atualizar_fatura(
-    fatura_id: int,
-    dados: FaturaUpdate,
-    db: Session = Depends(get_db),
-):
+def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
     data = dados.dict(exclude_unset=True)
-
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
@@ -288,28 +288,27 @@ def atualizar_fatura(
     db.refresh(fatura)
     return fatura_to_out(fatura)
 
-
 @app.delete("/faturas/{fatura_id}")
 def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # Remove arquivos do disco
+    # apaga anexos no R2
+    s3 = get_s3_client()
     for anexo in fatura.anexos:
-        caminho = os.path.join(ANEXOS_DIR, anexo.filename)
-        if os.path.exists(caminho):
-            os.remove(caminho)
+        try:
+            s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+        except ClientError as e:
+            print("ERRO AO DELETAR OBJETO NO R2:", e)
 
     db.delete(fatura)
     db.commit()
     return {"ok": True}
 
-
 # =========================
-# ANEXOS
+# ANEXOS (R2)
 # =========================
-
 
 @app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
 async def upload_anexos(
@@ -321,18 +320,29 @@ async def upload_anexos(
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    anexos_criados = []
+    s3 = get_s3_client()
+    anexos_criados: List[AnexoDB] = []
 
     for file in files:
-        unique_name = f"{uuid.uuid4().hex}_{file.filename}"
-        caminho = os.path.join(ANEXOS_DIR, unique_name)
+        # key no R2: faturas/<id>/<uuid>_<nome>
+        key = f"faturas/{fatura_id}/{uuid.uuid4().hex}_{file.filename}"
 
-        with open(caminho, "wb") as f:
-            f.write(await file.read())
+        data = await file.read()
+
+        try:
+            s3.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=key,
+                Body=data,
+                ContentType=file.content_type or "application/octet-stream",
+            )
+        except ClientError as e:
+            print("ERRO PUT R2:", e)
+            raise HTTPException(status_code=500, detail="Erro ao enviar anexo para o R2")
 
         anexo_db = AnexoDB(
             fatura_id=fatura_id,
-            filename=unique_name,
+            filename=key,  # agora é a key do R2
             original_name=file.filename,
             content_type=file.content_type or "application/octet-stream",
         )
@@ -340,60 +350,65 @@ async def upload_anexos(
         anexos_criados.append(anexo_db)
 
     db.commit()
-
     return anexos_criados
-
 
 @app.get("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
 def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
     return fatura.anexos
-
 
 @app.get("/anexos/{anexo_id}")
 def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
+    """
+    Download direto (sem link do R2).
+    O browser baixa porque mandamos Content-Disposition: attachment.
+    """
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    caminho = os.path.join(ANEXOS_DIR, anexo.filename)
-    if not os.path.exists(caminho):
-        raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
+    s3 = get_s3_client()
 
-    return FileResponse(
-        caminho,
-        media_type=anexo.content_type,
-        filename=anexo.original_name,
-    )
+    try:
+        obj = s3.get_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+        stream = obj["Body"]  # streaming file-like
+    except ClientError as e:
+        print("ERRO GET R2:", e)
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado no R2")
 
+    headers = {
+        "Content-Disposition": f'attachment; filename="{anexo.original_name}"'
+    }
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# >>> NOVO: EXCLUIR ANEXO (BOTÃO NO MODAL VAI USAR) <<<
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    return StreamingResponse(stream, media_type=anexo.content_type, headers=headers)
+
 @app.delete("/anexos/{anexo_id}")
-def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
+def excluir_anexo(anexo_id: int, db: Session = Depends(get_db)):
+    """
+    Exclui o anexo no R2 e remove do banco.
+    """
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    # apaga o arquivo físico
-    caminho = os.path.join(ANEXOS_DIR, anexo.filename)
-    if os.path.exists(caminho):
-        os.remove(caminho)
+    s3 = get_s3_client()
 
-    # apaga do banco
+    try:
+        s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+    except ClientError as e:
+        print("ERRO DELETE R2:", e)
+        # mesmo assim vamos tentar remover do banco? aqui eu prefiro falhar
+        raise HTTPException(status_code=500, detail="Erro ao excluir anexo no R2")
+
     db.delete(anexo)
     db.commit()
     return {"ok": True}
 
-
 # =========================
 # DASHBOARD / EXPORT
 # =========================
-
 
 @app.get("/dashboard/resumo")
 def resumo_dashboard(
@@ -401,21 +416,8 @@ def resumo_dashboard(
     transportadora: Optional[str] = Query(None),
     ate_vencimento: Optional[str] = Query(None),
 ):
-    """
-    Regra ajustada para bater com o Dashboard (tabela):
-
-    - TOTAL       = soma de todos os valores filtrados
-    - PENDENTES   = todas as faturas com status 'pendente'
-    - ATRASADAS   = faturas com:
-        * status 'atrasado'
-          OU
-        * status 'pendente' e vencimento < próxima quarta
-    - EM DIA      = faturas com status 'pendente' e vencimento == próxima quarta
-    """
-
     hoje = date.today()
 
-    # próxima quarta-feira (seg=0, ter=1, qua=2)
     weekday = hoje.weekday()
     dias_ate_quarta = (2 - weekday) % 7
     if dias_ate_quarta == 0:
@@ -425,9 +427,7 @@ def resumo_dashboard(
     query_base = db.query(FaturaDB)
 
     if transportadora:
-        query_base = query_base.filter(
-            FaturaDB.transportadora.ilike(f"%{transportadora}%")
-        )
+        query_base = query_base.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
     if ate_vencimento:
         try:
@@ -436,21 +436,14 @@ def resumo_dashboard(
         except ValueError:
             pass
 
-    total = query_base.with_entities(
-        func.coalesce(func.sum(FaturaDB.valor), 0)
-    ).scalar()
+    total = query_base.with_entities(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
 
-    # todas as pendentes (independente de data)
     pendentes_val = (
         query_base.filter(FaturaDB.status.ilike("pendente"))
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
-    # ATRASADAS:
-    # - status 'atrasado'
-    #   OU
-    # - status 'pendente' e data_vencimento < prox_quarta
     atrasadas_val = (
         query_base.filter(
             or_(
@@ -465,7 +458,6 @@ def resumo_dashboard(
         .scalar()
     )
 
-    # EM DIA: pendentes com vencimento == prox_quarta
     em_dia_val = (
         query_base.filter(
             FaturaDB.status.ilike("pendente"),
@@ -482,16 +474,12 @@ def resumo_dashboard(
         "em_dia": float(em_dia_val or 0),
     }
 
-
 @app.get("/faturas/exportar")
 def exportar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
-    """
-    Exporta CSV (Excel abre normal).
-    """
     import csv
     import io
 
@@ -507,16 +495,7 @@ def exportar_faturas(
     writer = csv.writer(output, delimiter=";")
 
     writer.writerow(
-        [
-            "ID",
-            "Transportadora",
-            "Responsável",
-            "Número Fatura",
-            "Valor",
-            "Data Vencimento",
-            "Status",
-            "Observação",
-        ]
+        ["ID","Transportadora","Responsável","Número Fatura","Valor","Data Vencimento","Status","Observação"]
     )
 
     for f in faturas:
@@ -534,7 +513,5 @@ def exportar_faturas(
         )
 
     csv_bytes = output.getvalue().encode("utf-8-sig")
-    headers = {
-        "Content-Disposition": 'attachment; filename="faturas.csv"'
-    }
+    headers = {"Content-Disposition": 'attachment; filename="faturas.csv"'}
     return Response(csv_bytes, media_type="text/csv", headers=headers)
