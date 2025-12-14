@@ -406,17 +406,61 @@ function setupMenuDelegation() {
     const acaoBtn = e.target.closest(".menu-dropdown button[data-acao]");
 
     // abrir/fechar menu
-    if (menuBtn) {
-      e.preventDefault();
-      e.stopPropagation();
+if (menuBtn) {
+  e.preventDefault();
+  e.stopPropagation();
 
-      fecharTodosMenus();
+  // se esse menu já estava aberto, fecha e sai
+  const acoesCell = menuBtn.closest(".acoes");
+  const dropdown = acoesCell ? acoesCell.querySelector(".menu-dropdown") : null;
+  const jaAberto = dropdown && dropdown.classList.contains("ativo");
 
-      const acoesCell = menuBtn.closest(".acoes");
-      const dropdown = acoesCell ? acoesCell.querySelector(".menu-dropdown") : null;
-      if (dropdown) dropdown.classList.toggle("ativo");
-      return;
+  fecharTodosMenus();
+  if (!dropdown || jaAberto) return;
+
+  // abre
+  dropdown.classList.add("ativo");
+
+  // Posicionamento inteligente (mobile/desktop)
+  const btnRect = menuBtn.getBoundingClientRect();
+
+  // Força medir altura real do dropdown
+  dropdown.style.position = "fixed";
+  dropdown.style.left = "0px";
+  dropdown.style.top = "0px";
+
+  const dropRect = dropdown.getBoundingClientRect();
+  const dropH = dropRect.height || 180;
+
+  const margem = 8;
+  const spaceBelow = window.innerHeight - btnRect.bottom;
+  const spaceAbove = btnRect.top;
+
+  // alinha na direita do botão (como você já queria)
+  const left = Math.max(margem, btnRect.right - dropRect.width);
+
+  dropdown.style.left = `${left}px`;
+
+  if (spaceBelow >= dropH + margem) {
+    // abre pra baixo
+    dropdown.style.top = `${btnRect.bottom + margem}px`;
+  } else if (spaceAbove >= dropH + margem) {
+    // abre pra cima
+    dropdown.style.top = `${btnRect.top - dropH - margem}px`;
+  } else {
+    // não cabe inteiro nem em cima nem embaixo: abre onde tiver mais espaço e limita altura
+    if (spaceBelow >= spaceAbove) {
+      dropdown.style.top = `${btnRect.bottom + margem}px`;
+      dropdown.style.maxHeight = `${Math.max(120, spaceBelow - 2 * margem)}px`;
+    } else {
+      dropdown.style.top = `${margem}px`;
+      dropdown.style.maxHeight = `${Math.max(120, spaceAbove - 2 * margem)}px`;
     }
+    dropdown.style.overflowY = "auto";
+  }
+
+  return;
+}
 
     // clicar em uma ação do dropdown
     if (acaoBtn) {
