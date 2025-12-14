@@ -490,10 +490,7 @@ if (menuBtn) {
 
   // clique fora fecha (corrigido)
 document.addEventListener("click", (e) => {
-  // se clicou dentro do menu ou no botão, não fecha
-  if (e.target.closest(".menu-dropdown") || e.target.closest(".menu-btn")) {
-    return;
-  }
+  if (e.target.closest(".menu-dropdown") || e.target.closest(".menu-btn")) return;
   fecharTodosMenus();
 });
 
