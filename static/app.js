@@ -406,61 +406,60 @@ function setupMenuDelegation() {
     const acaoBtn = e.target.closest(".menu-dropdown button[data-acao]");
 
     // abrir/fechar menu
-if (menuBtn) {
-  e.preventDefault();
-  e.stopPropagation();
+    if (menuBtn) {
+      e.preventDefault();
+      e.stopPropagation();
 
-  // se esse menu já estava aberto, fecha e sai
-  const acoesCell = menuBtn.closest(".acoes");
-  const dropdown = acoesCell ? acoesCell.querySelector(".menu-dropdown") : null;
-  const jaAberto = dropdown && dropdown.classList.contains("ativo");
+      // se esse menu já estava aberto, fecha e sai
+      const acoesCell = menuBtn.closest(".acoes");
+      const dropdown = acoesCell ? acoesCell.querySelector(".menu-dropdown") : null;
+      const jaAberto = dropdown && dropdown.classList.contains("ativo");
 
-  fecharTodosMenus();
-  if (!dropdown || jaAberto) return;
+      fecharTodosMenus();
+      if (!dropdown || jaAberto) return;
 
-  // abre
-  dropdown.classList.add("ativo");
+      // abre
+      dropdown.classList.add("ativo");
 
-  // Posicionamento inteligente (mobile/desktop)
-  const btnRect = menuBtn.getBoundingClientRect();
+      // Posicionamento inteligente (mobile/desktop)
+      const btnRect = menuBtn.getBoundingClientRect();
 
-  // Força medir altura real do dropdown
-  dropdown.style.position = "fixed";
-  dropdown.style.left = "0px";
-  dropdown.style.top = "0px";
+      // Força medir altura real do dropdown
+      dropdown.style.position = "fixed";
+      dropdown.style.left = "0px";
+      dropdown.style.top = "0px";
 
-  const dropRect = dropdown.getBoundingClientRect();
-  const dropH = dropRect.height || 180;
+      const dropRect = dropdown.getBoundingClientRect();
+      const dropH = dropRect.height || 180;
 
-  const margem = 8;
-  const spaceBelow = window.innerHeight - btnRect.bottom;
-  const spaceAbove = btnRect.top;
+      const margem = 8;
+      const spaceBelow = window.innerHeight - btnRect.bottom;
+      const spaceAbove = btnRect.top;
 
-  // alinha na direita do botão (como você já queria)
-  const left = Math.max(margem, btnRect.right - dropRect.width);
+      // alinha na direita do botão
+      const left = Math.max(margem, btnRect.right - dropRect.width);
+      dropdown.style.left = `${left}px`;
 
-  dropdown.style.left = `${left}px`;
+      if (spaceBelow >= dropH + margem) {
+        // abre pra baixo
+        dropdown.style.top = `${btnRect.bottom + margem}px`;
+      } else if (spaceAbove >= dropH + margem) {
+        // abre pra cima
+        dropdown.style.top = `${btnRect.top - dropH - margem}px`;
+      } else {
+        // não cabe inteiro nem em cima nem embaixo
+        if (spaceBelow >= spaceAbove) {
+          dropdown.style.top = `${btnRect.bottom + margem}px`;
+          dropdown.style.maxHeight = `${Math.max(120, spaceBelow - 2 * margem)}px`;
+        } else {
+          dropdown.style.top = `${margem}px`;
+          dropdown.style.maxHeight = `${Math.max(120, spaceAbove - 2 * margem)}px`;
+        }
+        dropdown.style.overflowY = "auto";
+      }
 
-  if (spaceBelow >= dropH + margem) {
-    // abre pra baixo
-    dropdown.style.top = `${btnRect.bottom + margem}px`;
-  } else if (spaceAbove >= dropH + margem) {
-    // abre pra cima
-    dropdown.style.top = `${btnRect.top - dropH - margem}px`;
-  } else {
-    // não cabe inteiro nem em cima nem embaixo: abre onde tiver mais espaço e limita altura
-    if (spaceBelow >= spaceAbove) {
-      dropdown.style.top = `${btnRect.bottom + margem}px`;
-      dropdown.style.maxHeight = `${Math.max(120, spaceBelow - 2 * margem)}px`;
-    } else {
-      dropdown.style.top = `${margem}px`;
-      dropdown.style.maxHeight = `${Math.max(120, spaceAbove - 2 * margem)}px`;
+      return;
     }
-    dropdown.style.overflowY = "auto";
-  }
-
-  return;
-}
 
     // clicar em uma ação do dropdown
     if (acaoBtn) {
@@ -488,11 +487,11 @@ if (menuBtn) {
     }
   });
 
-  // clique fora fecha (corrigido)
-document.addEventListener("click", (e) => {
-  if (e.target.closest(".menu-dropdown") || e.target.closest(".menu-btn")) return;
-  fecharTodosMenus();
-});
+  // clique fora fecha
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".menu-dropdown") || e.target.closest(".menu-btn")) return;
+    fecharTodosMenus();
+  });
 
   // ESC fecha
   document.addEventListener("keydown", (e) => {
@@ -641,7 +640,16 @@ async function salvarFatura(e) {
         body: fd,
       });
 
-      if (!respAnexos.ok) console.error("Erro ao enviar anexos");
+      // >>> ALTERAÇÃO MÍNIMA: ler erro real e limpar o input <<<
+      if (!respAnexos.ok) {
+        const txt = await respAnexos.text().catch(() => "");
+        console.error("Erro ao enviar anexos:", txt);
+      } else {
+        // opcional: força consumir resposta (ajuda debug)
+        await respAnexos.json().catch(() => null);
+        // limpa o input file (pra não reenviar sem querer)
+        inputAnexos.value = "";
+      }
     }
 
     form.reset();
