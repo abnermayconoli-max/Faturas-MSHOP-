@@ -438,16 +438,14 @@ function setupMenuDelegation() {
 
       // alinha na direita do botão
       const left = Math.max(margem, btnRect.right - dropRect.width);
+
       dropdown.style.left = `${left}px`;
 
       if (spaceBelow >= dropH + margem) {
-        // abre pra baixo
         dropdown.style.top = `${btnRect.bottom + margem}px`;
       } else if (spaceAbove >= dropH + margem) {
-        // abre pra cima
         dropdown.style.top = `${btnRect.top - dropH - margem}px`;
       } else {
-        // não cabe inteiro nem em cima nem embaixo
         if (spaceBelow >= spaceAbove) {
           dropdown.style.top = `${btnRect.bottom + margem}px`;
           dropdown.style.maxHeight = `${Math.max(120, spaceBelow - 2 * margem)}px`;
@@ -640,14 +638,27 @@ async function salvarFatura(e) {
         body: fd,
       });
 
-      // >>> ALTERAÇÃO MÍNIMA: ler erro real e limpar o input <<<
+      // ✅ AQUI É A CORREÇÃO: se falhar, mostrar o motivo
       if (!respAnexos.ok) {
-        const txt = await respAnexos.text().catch(() => "");
-        console.error("Erro ao enviar anexos:", txt);
+        let detalhe = "";
+        try {
+          const ct = respAnexos.headers.get("content-type") || "";
+          if (ct.includes("application/json")) {
+            const j = await respAnexos.json();
+            detalhe = j?.detail ? String(j.detail) : JSON.stringify(j);
+          } else {
+            detalhe = await respAnexos.text();
+          }
+        } catch (_) {
+          detalhe = "";
+        }
+
+        console.error("Erro ao enviar anexos:", respAnexos.status, detalhe);
+        alert(
+          `A fatura foi salva, mas o upload do anexo FALHOU.\n\nStatus: ${respAnexos.status}\n${detalhe || ""}`
+        );
       } else {
-        // opcional: força consumir resposta (ajuda debug)
-        await respAnexos.json().catch(() => null);
-        // limpa o input file (pra não reenviar sem querer)
+        // se deu certo, limpa o input
         inputAnexos.value = "";
       }
     }
