@@ -59,19 +59,17 @@ R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 
-if not all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY]):
-    raise RuntimeError(
-        "R2 não configurado. Verifique as env vars: "
-        "R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
-    )
+R2_OK = all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY])
 
-s3 = boto3.client(
-    "s3",
-    endpoint_url=R2_ENDPOINT,
-    aws_access_key_id=R2_ACCESS_KEY_ID,
-    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-    region_name="auto",
-)
+s3 = None
+if R2_OK:
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+    )
 
 def _r2_key(fatura_id: int, original_filename: str) -> str:
     safe_name = (original_filename or "arquivo").replace("/", "_").replace("\\", "_")
@@ -303,19 +301,20 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # Remove arquivos do R2 (em vez do disco)
-    for anexo in fatura.anexos:
-        try:
-            s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
-        except ClientError as e:
-            print("ERRO AO APAGAR NO R2:", repr(e))
+    # Remove arquivos do R2
+    if R2_OK and s3:
+        for anexo in fatura.anexos:
+            try:
+                s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+            except ClientError as e:
+                print("ERRO AO APAGAR NO R2:", repr(e))
 
     db.delete(fatura)
     db.commit()
     return {"ok": True}
 
 # =========================
-# ANEXOS
+# ANEXOS (R2)
 # =========================
 
 @app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
@@ -324,6 +323,12 @@ async def upload_anexos(
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
+    if not (R2_OK and s3):
+        raise HTTPException(
+            status_code=500,
+            detail="R2 não configurado no Render. Configure R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY.",
+        )
+
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
@@ -368,6 +373,12 @@ def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
 
 @app.get("/anexos/{anexo_id}")
 def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
+    if not (R2_OK and s3):
+        raise HTTPException(
+            status_code=500,
+            detail="R2 não configurado no Render.",
+        )
+
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
@@ -385,11 +396,14 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
     }
     return StreamingResponse(body, media_type=content_type, headers=headers)
 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# >>> NOVO: EXCLUIR ANEXO (BOTÃO NO MODAL VAI USAR) <<<
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 @app.delete("/anexos/{anexo_id}")
 def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
+    if not (R2_OK and s3):
+        raise HTTPException(
+            status_code=500,
+            detail="R2 não configurado no Render.",
+        )
+
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
