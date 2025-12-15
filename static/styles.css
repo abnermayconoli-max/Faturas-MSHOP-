@@ -78,6 +78,18 @@ body {
   background: #022c22;
 }
 
+/* date input sidebar */
+.sidebar input[type="date"] {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 10px 14px;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
 /* ========== MAIN / TABS ========== */
 
 .main {
@@ -107,21 +119,214 @@ body {
   color: #ffffff;
 }
 
+.section {
+  display: none;
+}
+
+.section.visible {
+  display: block;
+}
+
+.section > h2 {
+  font-size: 22px;
+  margin-bottom: 16px;
+}
+
+/* ========== CARDS ========== */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.cards-small {
+  margin-top: 16px;
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid #1f2937;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.card h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.card p {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.card.mini {
+  padding: 14px 18px;
+}
+
+.card.mini p {
+  font-size: 18px;
+}
+
+/* ========== FORM CADASTRO ========== */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid #1f2937;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.form-group input,
+.form-group select {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.form-group input[type="file"] {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #020617;
+}
+
+.form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+button.primary {
+  background: #16a34a;
+  border: 1px solid #16a34a;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button.primary:hover {
+  background: #22c55e;
+  border-color: #22c55e;
+}
+
+button.secondary {
+  border-radius: 999px;
+  padding: 9px 16px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+button.secondary:hover {
+  background: #111827;
+}
+
+/* ========== FILTROS FATURAS ========== */
+
+.filtros-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-group label {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+/* select do filtro de STATUS */
+.field-group select {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+#buscaNumero {
+  min-width: 220px;
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 9px 14px;
+}
+
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range input[type="date"] {
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 8px 12px;
+}
+
+.filtros-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* ========== TABELA FATURAS ========== */
 
 .table-section {
   margin-top: 18px;
-  position: relative;
-  overflow: visible;
+}
+
+.table-section h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
 }
 
 .tabela {
   width: 100%;
-  border-collapse: separate;   /* ✅ ALTERADO */
-  border-spacing: 0;           /* ✅ ADICIONADO */
+  border-collapse: collapse;
   background: rgba(15, 23, 42, 0.95);
   border-radius: 14px;
-  overflow: visible;
+  overflow: hidden;
+}
+
+.tabela thead {
+  background: #020617;
 }
 
 .tabela th,
@@ -131,10 +336,19 @@ body {
   border-bottom: 1px solid #111827;
 }
 
+.tabela th {
+  text-align: left;
+  color: #9ca3af;
+}
+
+.tabela tbody tr:hover {
+  background: rgba(15, 23, 42, 0.85);
+}
+
+/* coluna de ações */
 .tabela td.acoes {
   position: relative;
-  z-index: 50;                 /* ✅ ADICIONADO */
-  overflow: visible;
+  width: 80px;
 }
 
 /* ========== MENU 3 PONTINHOS ========== */
@@ -164,10 +378,169 @@ body {
   padding: 4px 0;
   min-width: 150px;
   display: none;
-  z-index: 99999;              /* ✅ ALTERADO */
+  z-index: 20;
   box-shadow: 0 16px 35px rgba(0, 0, 0, 0.6);
 }
 
 .menu-dropdown.ativo {
   display: block;
+}
+
+.menu-dropdown button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menu-dropdown button:hover {
+  background: #111827;
+}
+
+/* ========== MODAL ANEXOS ========== */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.modal.open {
+  display: flex;
+}
+
+.modal-content {
+  background: #020617;
+  border-radius: 14px;
+  padding: 20px 22px;
+  border: 1px solid #374151;
+  min-width: 320px;
+  max-width: 520px;
+}
+
+.modal-content h2 {
+  margin-bottom: 10px;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 20px;
+  float: right;
+  cursor: pointer;
+}
+
+#listaAnexos {
+  list-style: none;
+  margin-top: 8px;
+}
+
+#listaAnexos li {
+  margin-bottom: 6px;
+}
+
+#listaAnexos a {
+  color: #22c55e;
+  text-decoration: none;
+}
+
+#listaAnexos a:hover {
+  text-decoration: underline;
+}
+
+/* ====== ANEXOS COM BOTÃO EXCLUIR (NOVO) ====== */
+
+.lista-anexos li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.lista-anexos a {
+  color: #22c55e;
+  text-decoration: none;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.lista-anexos a:hover {
+  text-decoration: underline;
+}
+
+.btn-excluir-anexo {
+  background: transparent;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-excluir-anexo:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+/* ========== DASHBOARD - RESUMO POR TRANSPORTADORA ========== */
+
+.dash-transportadoras {
+  margin-top: 28px;
+}
+
+.dash-transportadoras h2 {
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+
+.dash-table-wrapper {
+  background: rgba(15, 23, 42, 0.95);
+  border-radius: 16px;
+  border: 1px solid #1f2937;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  overflow-x: auto;
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+
+.dash-table thead {
+  background: #020617;
+}
+
+.dash-table th,
+.dash-table td {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid #111827;
+}
+
+.dash-table th {
+  text-align: left;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.dash-table tbody tr:hover {
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.dash-table tfoot td {
+  font-weight: 600;
+  background: #020617;
 }
