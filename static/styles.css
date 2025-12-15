@@ -310,8 +310,6 @@ button.secondary:hover {
 
 .table-section {
   margin-top: 18px;
-  position: relative;
-  overflow: visible; /* ✅ importante p/ dropdown aparecer */
 }
 
 .table-section h2 {
@@ -324,9 +322,7 @@ button.secondary:hover {
   border-collapse: collapse;
   background: rgba(15, 23, 42, 0.95);
   border-radius: 14px;
-
-  /* ✅ AQUI É A CORREÇÃO DO SEU BUG */
-  overflow: visible; /* antes era hidden e cortava o menu */
+  overflow: hidden;
 }
 
 .tabela thead {
@@ -353,7 +349,6 @@ button.secondary:hover {
 .tabela td.acoes {
   position: relative;
   width: 80px;
-  overflow: visible; /* ✅ garante dropdown sem corte */
 }
 
 /* ========== MENU 3 PONTINHOS ========== */
@@ -366,8 +361,6 @@ button.secondary:hover {
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 999px;
-  position: relative;
-  z-index: 2;
 }
 
 .menu-btn:hover {
@@ -385,7 +378,7 @@ button.secondary:hover {
   padding: 4px 0;
   min-width: 150px;
   display: none;
-  z-index: 9999; /* ✅ sobe acima da tabela */
+  z-index: 20;
   box-shadow: 0 16px 35px rgba(0, 0, 0, 0.6);
 }
 
@@ -430,7 +423,7 @@ button.secondary:hover {
   padding: 20px 22px;
   border: 1px solid #374151;
   min-width: 320px;
-  max-width: 620px;
+  max-width: 520px;
 }
 
 .modal-content h2 {
@@ -449,45 +442,56 @@ button.secondary:hover {
 #listaAnexos {
   list-style: none;
   margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 #listaAnexos li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid #1f2937;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.65);
+  margin-bottom: 6px;
 }
 
 #listaAnexos a {
   color: #22c55e;
   text-decoration: none;
-  word-break: break-word;
 }
 
 #listaAnexos a:hover {
   text-decoration: underline;
 }
 
+/* ====== ANEXOS COM BOTÃO EXCLUIR (NOVO) ====== */
+
+.lista-anexos li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.lista-anexos a {
+  color: #22c55e;
+  text-decoration: none;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.lista-anexos a:hover {
+  text-decoration: underline;
+}
+
 .btn-excluir-anexo {
-  border: 1px solid #374151;
-  background: #020617;
-  color: #e5e7eb;
+  background: transparent;
+  border: 1px solid #ef4444;
+  color: #ef4444;
   border-radius: 999px;
-  padding: 6px 10px;
-  cursor: pointer;
+  padding: 4px 10px;
   font-size: 12px;
-  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .btn-excluir-anexo:hover {
-  background: #111827;
+  background: #ef4444;
+  color: #fff;
 }
 
 /* ========== DASHBOARD - RESUMO POR TRANSPORTADORA ========== */
