@@ -3,9 +3,6 @@ import os
 import uuid
 from typing import List, Optional
 
-import boto3
-from botocore.exceptions import ClientError
-
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -15,7 +12,7 @@ from fastapi import (
     Query,
     Request,
 )
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -38,6 +35,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 # =========================
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL não configurada nas variáveis de ambiente do Render.")
 
@@ -45,56 +43,14 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# =========================
-# CONFIG CLOUDFLARE R2
-# =========================
-
-R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
-R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-
-def _require_r2():
-    missing = []
-    if not R2_ACCOUNT_ID: missing.append("R2_ACCOUNT_ID")
-    if not R2_ACCESS_KEY: missing.append("R2_ACCESS_KEY")
-    if not R2_SECRET_KEY: missing.append("R2_SECRET_KEY")
-    if not R2_BUCKET_NAME: missing.append("R2_BUCKET_NAME")
-    if missing:
-        raise RuntimeError(f"Variáveis R2 faltando: {', '.join(missing)}")
-
-def get_s3_client():
-    _require_r2()
-    endpoint = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-    return boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=R2_ACCESS_KEY,
-        aws_secret_access_key=R2_SECRET_KEY,
-        region_name="auto",
-    )
-
-def r2_upload_bytes(storage_key: str, content_bytes: bytes, content_type: str):
-    s3 = get_s3_client()
-    s3.put_object(
-        Bucket=R2_BUCKET_NAME,
-        Key=storage_key,
-        Body=content_bytes,
-        ContentType=content_type or "application/octet-stream",
-    )
-
-def r2_delete(storage_key: str):
-    s3 = get_s3_client()
-    s3.delete_object(Bucket=R2_BUCKET_NAME, Key=storage_key)
-
-def r2_get_stream(storage_key: str):
-    s3 = get_s3_client()
-    obj = s3.get_object(Bucket=R2_BUCKET_NAME, Key=storage_key)
-    return obj["Body"]  # StreamingBody
+# Pasta para anexos (no disco do container)
+ANEXOS_DIR = "anexos"
+os.makedirs(ANEXOS_DIR, exist_ok=True)
 
 # =========================
 # MODELOS SQLALCHEMY
 # =========================
+
 
 class FaturaDB(Base):
     __tablename__ = "faturas"
@@ -120,22 +76,21 @@ class AnexoDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-
-    # ✅ AGORA: caminho do arquivo no R2
-    storage_key = Column(String, nullable=False)
-
-    original_name = Column(String, nullable=False)
-    content_type = Column(String, nullable=False)
+    filename = Column(String)       # nome salvo no disco
+    original_name = Column(String)  # nome que o usuário enviou
+    content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
     fatura = relationship("FaturaDB", back_populates="anexos")
 
 
+# Cria tabelas (se não existirem)
 Base.metadata.create_all(bind=engine)
 
 # =========================
 # Pydantic
 # =========================
+
 
 class FaturaBase(BaseModel):
     transportadora: str
@@ -145,8 +100,11 @@ class FaturaBase(BaseModel):
     status: str = "pendente"
     observacao: Optional[str] = None
 
+
 class FaturaCreate(FaturaBase):
+    """Usado no POST /faturas"""
     pass
+
 
 class FaturaUpdate(BaseModel):
     transportadora: Optional[str] = None
@@ -156,6 +114,7 @@ class FaturaUpdate(BaseModel):
     status: Optional[str] = None
     observacao: Optional[str] = None
 
+
 class AnexoOut(BaseModel):
     id: int
     original_name: str
@@ -163,12 +122,14 @@ class AnexoOut(BaseModel):
     class Config:
         orm_mode = True
 
+
 class FaturaOut(FaturaBase):
     id: int
     responsavel: Optional[str] = None
 
     class Config:
         orm_mode = True
+
 
 # =========================
 # MAPEAMENTO RESPONSÁVEL
@@ -191,11 +152,13 @@ RESP_MAP = {
     "GLM - Larissa": "Larissa",
 }
 
+
 def get_responsavel(transportadora: str) -> Optional[str]:
     if transportadora in RESP_MAP:
         return RESP_MAP[transportadora]
     base = transportadora.split("-")[0].strip()
     return RESP_MAP.get(base)
+
 
 def fatura_to_out(f: FaturaDB) -> FaturaOut:
     return FaturaOut(
@@ -209,9 +172,11 @@ def fatura_to_out(f: FaturaDB) -> FaturaOut:
         responsavel=get_responsavel(f.transportadora),
     )
 
+
 # =========================
 # DEPENDÊNCIA DO BANCO
 # =========================
+
 
 def get_db():
     db = SessionLocal()
@@ -220,26 +185,34 @@ def get_db():
     finally:
         db.close()
 
+
 # =========================
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas Transportadoras", version="0.7.0")
+app = FastAPI(
+    title="Sistema de Faturas Transportadoras",
+    version="0.6.0",
+)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
+
 # =========================
 # ROTAS DE FATURAS - CRUD
 # =========================
+
 
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
@@ -259,6 +232,7 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
     except Exception as e:
         print("ERRO AO CRIAR FATURA:", repr(e))
         raise HTTPException(status_code=400, detail="Erro ao criar fatura")
+
 
 @app.get("/faturas", response_model=List[FaturaOut])
 def listar_faturas(
@@ -286,6 +260,7 @@ def listar_faturas(
     faturas_db = query.all()
     return [fatura_to_out(f) for f in faturas_db]
 
+
 @app.get("/faturas/{fatura_id}", response_model=FaturaOut)
 def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
@@ -293,13 +268,19 @@ def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
     return fatura_to_out(fatura)
 
+
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
-def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(get_db)):
+def atualizar_fatura(
+    fatura_id: int,
+    dados: FaturaUpdate,
+    db: Session = Depends(get_db),
+):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
     data = dados.dict(exclude_unset=True)
+
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
@@ -307,26 +288,28 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(
     db.refresh(fatura)
     return fatura_to_out(fatura)
 
+
 @app.delete("/faturas/{fatura_id}")
 def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # ✅ apaga anexos do R2 antes de apagar a fatura
-    for anexo in list(fatura.anexos):
-        try:
-            r2_delete(anexo.storage_key)
-        except Exception as e:
-            print("ERRO AO APAGAR NO R2:", repr(e), "storage_key=", anexo.storage_key)
+    # Remove arquivos do disco
+    for anexo in fatura.anexos:
+        caminho = os.path.join(ANEXOS_DIR, anexo.filename)
+        if os.path.exists(caminho):
+            os.remove(caminho)
 
     db.delete(fatura)
     db.commit()
     return {"ok": True}
 
+
 # =========================
-# ANEXOS (R2)
+# ANEXOS
 # =========================
+
 
 @app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
 async def upload_anexos(
@@ -338,25 +321,18 @@ async def upload_anexos(
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    anexos_criados: List[AnexoDB] = []
+    anexos_criados = []
 
     for file in files:
-        # chave no R2 (organizado por fatura)
-        storage_key = f"faturas/{fatura_id}/{uuid.uuid4().hex}_{file.filename}"
+        unique_name = f"{uuid.uuid4().hex}_{file.filename}"
+        caminho = os.path.join(ANEXOS_DIR, unique_name)
 
-        content = await file.read()
-        if not content:
-            continue
-
-        try:
-            r2_upload_bytes(storage_key, content, file.content_type or "application/octet-stream")
-        except Exception as e:
-            print("ERRO UPLOAD R2:", repr(e))
-            raise HTTPException(status_code=500, detail="Erro ao enviar anexo")
+        with open(caminho, "wb") as f:
+            f.write(await file.read())
 
         anexo_db = AnexoDB(
             fatura_id=fatura_id,
-            storage_key=storage_key,
+            filename=unique_name,
             original_name=file.filename,
             content_type=file.content_type or "application/octet-stream",
         )
@@ -364,64 +340,60 @@ async def upload_anexos(
         anexos_criados.append(anexo_db)
 
     db.commit()
+
     return anexos_criados
+
 
 @app.get("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
 def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
+
     return fatura.anexos
+
 
 @app.get("/anexos/{anexo_id}")
 def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    """
-    ✅ Download direto (força baixar, não abrir em aba).
-    Mantive a mesma rota /anexos/{id} pra não quebrar seu app.js.
-    """
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    try:
-        stream = r2_get_stream(anexo.storage_key)
-    except ClientError:
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado no storage")
-    except Exception as e:
-        print("ERRO BAIXAR R2:", repr(e))
-        raise HTTPException(status_code=500, detail="Erro ao baixar anexo")
+    caminho = os.path.join(ANEXOS_DIR, anexo.filename)
+    if not os.path.exists(caminho):
+        raise HTTPException(status_code=404, detail="Arquivo físico não encontrado")
 
-    return StreamingResponse(
-        stream,
-        media_type=anexo.content_type or "application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{anexo.original_name}"'
-        },
+    return FileResponse(
+        caminho,
+        media_type=anexo.content_type,
+        filename=anexo.original_name,
     )
 
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# >>> NOVO: EXCLUIR ANEXO (BOTÃO NO MODAL VAI USAR) <<<
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 @app.delete("/anexos/{anexo_id}")
 def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    """
-    ✅ Botão Excluir anexo: apaga do R2 e remove do banco
-    """
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
 
-    try:
-        r2_delete(anexo.storage_key)
-    except Exception as e:
-        print("ERRO AO APAGAR NO R2:", repr(e), "storage_key=", anexo.storage_key)
-        # mesmo assim, pode deletar do banco se você preferir:
-        # raise HTTPException(500, "Erro ao excluir arquivo no storage")
+    # apaga o arquivo físico
+    caminho = os.path.join(ANEXOS_DIR, anexo.filename)
+    if os.path.exists(caminho):
+        os.remove(caminho)
 
+    # apaga do banco
     db.delete(anexo)
     db.commit()
     return {"ok": True}
 
+
 # =========================
 # DASHBOARD / EXPORT
 # =========================
+
 
 @app.get("/dashboard/resumo")
 def resumo_dashboard(
@@ -429,6 +401,18 @@ def resumo_dashboard(
     transportadora: Optional[str] = Query(None),
     ate_vencimento: Optional[str] = Query(None),
 ):
+    """
+    Regra ajustada para bater com o Dashboard (tabela):
+
+    - TOTAL       = soma de todos os valores filtrados
+    - PENDENTES   = todas as faturas com status 'pendente'
+    - ATRASADAS   = faturas com:
+        * status 'atrasado'
+          OU
+        * status 'pendente' e vencimento < próxima quarta
+    - EM DIA      = faturas com status 'pendente' e vencimento == próxima quarta
+    """
+
     hoje = date.today()
 
     # próxima quarta-feira (seg=0, ter=1, qua=2)
@@ -441,7 +425,9 @@ def resumo_dashboard(
     query_base = db.query(FaturaDB)
 
     if transportadora:
-        query_base = query_base.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
+        query_base = query_base.filter(
+            FaturaDB.transportadora.ilike(f"%{transportadora}%")
+        )
 
     if ate_vencimento:
         try:
@@ -450,14 +436,21 @@ def resumo_dashboard(
         except ValueError:
             pass
 
-    total = query_base.with_entities(func.coalesce(func.sum(FaturaDB.valor), 0)).scalar()
+    total = query_base.with_entities(
+        func.coalesce(func.sum(FaturaDB.valor), 0)
+    ).scalar()
 
+    # todas as pendentes (independente de data)
     pendentes_val = (
         query_base.filter(FaturaDB.status.ilike("pendente"))
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
+    # ATRASADAS:
+    # - status 'atrasado'
+    #   OU
+    # - status 'pendente' e data_vencimento < prox_quarta
     atrasadas_val = (
         query_base.filter(
             or_(
@@ -472,6 +465,7 @@ def resumo_dashboard(
         .scalar()
     )
 
+    # EM DIA: pendentes com vencimento == prox_quarta
     em_dia_val = (
         query_base.filter(
             FaturaDB.status.ilike("pendente"),
@@ -488,12 +482,16 @@ def resumo_dashboard(
         "em_dia": float(em_dia_val or 0),
     }
 
+
 @app.get("/faturas/exportar")
 def exportar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
+    """
+    Exporta CSV (Excel abre normal).
+    """
     import csv
     import io
 
@@ -509,7 +507,16 @@ def exportar_faturas(
     writer = csv.writer(output, delimiter=";")
 
     writer.writerow(
-        ["ID", "Transportadora", "Responsável", "Número Fatura", "Valor", "Data Vencimento", "Status", "Observação"]
+        [
+            "ID",
+            "Transportadora",
+            "Responsável",
+            "Número Fatura",
+            "Valor",
+            "Data Vencimento",
+            "Status",
+            "Observação",
+        ]
     )
 
     for f in faturas:
@@ -527,5 +534,7 @@ def exportar_faturas(
         )
 
     csv_bytes = output.getvalue().encode("utf-8-sig")
-    headers = {"Content-Disposition": 'attachment; filename="faturas.csv"'}
+    headers = {
+        "Content-Disposition": 'attachment; filename="faturas.csv"'
+    }
     return Response(csv_bytes, media_type="text/csv", headers=headers)
