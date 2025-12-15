@@ -407,17 +407,16 @@ button.secondary:hover {
 
 .menu-dropdown {
   position: absolute;
-  right: 4px;
-  top: 100%;
-  margin-top: 4px;
+  right: 0;
+  top: 36px;
   background: #020617;
   border: 1px solid #374151;
   border-radius: 10px;
-  padding: 4px 0;
-  min-width: 150px;
+  padding: 6px 0;
+  width: 140px;          /* 🔹 tamanho fixo */
   display: none;
   z-index: 50;
-  box-shadow: 0 16px 35px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
 }
 
 .menu-dropdown.ativo {
