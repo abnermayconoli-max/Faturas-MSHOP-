@@ -1,567 +1,864 @@
-from datetime import date, datetime, timedelta
-import os
-import uuid
-from typing import List, Optional
+// URL base (vazio = mesmo domínio)
+const API_BASE = "";
 
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    UploadFile,
-    File,
-    Query,
-    Request,
-)
-from fastapi.responses import FileResponse, HTMLResponse, Response
-from fastapi.responses import StreamingResponse  # <<< NOVO (para baixar do R2)
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    Date,
-    Numeric,
-    ForeignKey,
-    func,
-    and_,
-    or_,
-)
-from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
+// ============ ESTADO (FILTROS) ============
 
-import boto3  # <<< NOVO (R2)
-from botocore.exceptions import ClientError  # <<< NOVO (R2)
+// Filtros globais (sidebar + busca)
+let filtroTransportadora = "";
+let filtroVencimento = "";
+let filtroNumeroFatura = "";
 
-# =========================
-# CONFIG BANCO DE DADOS
-# =========================
+// Filtros só da aba Faturas
+let filtroDataInicioFaturas = "";
+let filtroDataFimFaturas = "";
+let filtroStatus = "";
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+// Cache da última lista vinda da API
+let ultimaListaFaturas = [];
 
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL não configurada nas variáveis de ambiente do Render.")
+// ============ HELPERS ============
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# Pasta para anexos (no disco do container) - mantida por compatibilidade
-ANEXOS_DIR = "anexos"
-os.makedirs(ANEXOS_DIR, exist_ok=True)
-
-# =========================
-# CONFIG R2 (Cloudflare)
-# =========================
-R2_ENDPOINT = os.getenv("R2_ENDPOINT")
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-
-R2_OK = all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY])
-
-s3 = None
-if R2_OK:
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-        region_name="auto",
-    )
-
-def _r2_key(fatura_id: int, original_filename: str) -> str:
-    safe_name = (original_filename or "arquivo").replace("/", "_").replace("\\", "_")
-    return f"anexos/{fatura_id}/{uuid.uuid4().hex}_{safe_name}"
-
-# =========================
-# MODELOS SQLALCHEMY
-# =========================
-
-class FaturaDB(Base):
-    __tablename__ = "faturas"
-
-    id = Column(Integer, primary_key=True, index=True)
-    transportadora = Column(String, index=True)
-    numero_fatura = Column(String, index=True)
-    valor = Column(Numeric(10, 2))
-    data_vencimento = Column(Date)
-    status = Column(String, default="pendente")
-    observacao = Column(String, nullable=True)
-
-    anexos = relationship(
-        "AnexoDB",
-        back_populates="fatura",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-
-class AnexoDB(Base):
-    __tablename__ = "anexos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    filename = Column(String)       # <<< agora guarda a KEY do R2
-    original_name = Column(String)  # nome que o usuário enviou
-    content_type = Column(String)
-    criado_em = Column(Date, default=date.today)
-
-    fatura = relationship("FaturaDB", back_populates="anexos")
-
-# Cria tabelas (se não existirem)
-Base.metadata.create_all(bind=engine)
-
-# =========================
-# Pydantic
-# =========================
-
-class FaturaBase(BaseModel):
-    transportadora: str
-    numero_fatura: str
-    valor: float
-    data_vencimento: date
-    status: str = "pendente"
-    observacao: Optional[str] = None
-
-class FaturaCreate(FaturaBase):
-    """Usado no POST /faturas"""
-    pass
-
-class FaturaUpdate(BaseModel):
-    transportadora: Optional[str] = None
-    numero_fatura: Optional[str] = None
-    valor: Optional[float] = None
-    data_vencimento: Optional[date] = None
-    status: Optional[str] = None
-    observacao: Optional[str] = None
-
-class AnexoOut(BaseModel):
-    id: int
-    original_name: str
-
-    class Config:
-        orm_mode = True
-
-class FaturaOut(FaturaBase):
-    id: int
-    responsavel: Optional[str] = None
-
-    class Config:
-        orm_mode = True
-
-# =========================
-# MAPEAMENTO RESPONSÁVEL
-# =========================
-
-RESP_MAP = {
-    "DHL": "Gabrielly",
-    "Pannan": "Gabrielly",
-    "Pannan - Gabrielly": "Gabrielly",
-    "DHL - Gabrielly": "Gabrielly",
-    "Garcia": "Juliana",
-    "Excargo": "Juliana",
-    "Garcia - Juliana": "Juliana",
-    "Excargo - Juliana": "Juliana",
-    "Transbritto": "Larissa",
-    "PDA": "Larissa",
-    "GLM": "Larissa",
-    "Transbritto - Larissa": "Larissa",
-    "PDA - Larissa": "Larissa",
-    "GLM - Larissa": "Larissa",
+function formatCurrency(valor) {
+  if (valor === null || valor === undefined) return "R$ 0,00";
+  const n = Number(valor) || 0;
+  return n.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+  });
 }
 
-def get_responsavel(transportadora: str) -> Optional[str]:
-    if transportadora in RESP_MAP:
-        return RESP_MAP[transportadora]
-    base = transportadora.split("-")[0].strip()
-    return RESP_MAP.get(base)
+// converte string ISO (yyyy-mm-dd ou data completa) pra Date LOCAL
+function parseISODateLocal(isoDate) {
+  if (!isoDate) return null;
 
-def fatura_to_out(f: FaturaDB) -> FaturaOut:
-    return FaturaOut(
-        id=f.id,
-        transportadora=f.transportadora,
-        numero_fatura=f.numero_fatura,
-        valor=float(f.valor or 0),
-        data_vencimento=f.data_vencimento,
-        status=f.status,
-        observacao=f.observacao,
-        responsavel=get_responsavel(f.transportadora),
-    )
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    const [y, m, d] = isoDate.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
 
-# =========================
-# DEPENDÊNCIA DO BANCO
-# =========================
+  const d = new Date(isoDate);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+// dd/mm/aaaa
+function formatDate(isoDate) {
+  if (!isoDate) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    const [y, m, d] = isoDate.split("-");
+    return `${d}/${m}/${y}`;
+  }
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString("pt-BR");
+}
 
-# =========================
-# APP / STATIC / TEMPLATES
-# =========================
+// ============ DASHBOARD ============
 
-app = FastAPI(
-    title="Sistema de Faturas Transportadoras",
-    version="0.6.0",
-)
+async function carregarDashboard() {
+  try {
+    const params = new URLSearchParams();
+    if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+    // 1) Resumo geral (cards) via API
+    const urlResumo =
+      params.toString().length > 0
+        ? `${API_BASE}/dashboard/resumo?${params.toString()}`
+        : `${API_BASE}/dashboard/resumo`;
 
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    const respResumo = await fetch(urlResumo);
+    if (!respResumo.ok) throw new Error("Erro ao buscar resumo");
 
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
+    const dataResumo = await respResumo.json();
 
-# =========================
-# ROTAS DE FATURAS - CRUD
-# =========================
+    document.getElementById("cardTotal").textContent = formatCurrency(dataResumo.total);
+    document.getElementById("cardPendentes").textContent = formatCurrency(dataResumo.pendentes);
+    document.getElementById("cardAtrasadas").textContent = formatCurrency(dataResumo.atrasadas);
+    document.getElementById("cardEmDia").textContent = formatCurrency(dataResumo.em_dia);
 
-@app.post("/faturas", response_model=FaturaOut)
-def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
-    try:
-        db_fatura = FaturaDB(
-            transportadora=fatura.transportadora,
-            numero_fatura=fatura.numero_fatura,
-            valor=fatura.valor,
-            data_vencimento=fatura.data_vencimento,
-            status=fatura.status,
-            observacao=fatura.observacao,
-        )
-        db.add(db_fatura)
-        db.commit()
-        db.refresh(db_fatura)
-        return fatura_to_out(db_fatura)
-    except Exception as e:
-        print("ERRO AO CRIAR FATURA:", repr(e))
-        raise HTTPException(status_code=400, detail="Erro ao criar fatura")
+    // 2) Tabela "Resumo por transportadora" usando a lista de faturas
+    let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
-@app.get("/faturas", response_model=List[FaturaOut])
-def listar_faturas(
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),
-    numero_fatura: Optional[str] = Query(None),
-):
-    query = db.query(FaturaDB)
+    if (lista.length === 0) {
+      const urlF =
+        params.toString().length > 0
+          ? `${API_BASE}/faturas?${params.toString()}`
+          : `${API_BASE}/faturas`;
 
-    if transportadora:
-        query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-
-    if ate_vencimento:
-        try:
-            filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
-            query = query.filter(FaturaDB.data_vencimento <= filtro_data)
-        except ValueError:
-            pass
-
-    if numero_fatura:
-        query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
-
-    query = query.order_by(FaturaDB.id)
-    faturas_db = query.all()
-    return [fatura_to_out(f) for f in faturas_db]
-
-@app.get("/faturas/{fatura_id}", response_model=FaturaOut)
-def obter_fatura(fatura_id: int, db: Session = Depends(get_db)):
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-    return fatura_to_out(fatura)
-
-@app.put("/faturas/{fatura_id}", response_model=FaturaOut)
-def atualizar_fatura(
-    fatura_id: int,
-    dados: FaturaUpdate,
-    db: Session = Depends(get_db),
-):
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
-    data = dados.dict(exclude_unset=True)
-
-    for campo, valor in data.items():
-        setattr(fatura, campo, valor)
-
-    db.commit()
-    db.refresh(fatura)
-    return fatura_to_out(fatura)
-
-@app.delete("/faturas/{fatura_id}")
-def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
-    # Remove arquivos do R2
-    if R2_OK and s3:
-        for anexo in fatura.anexos:
-            try:
-                s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
-            except ClientError as e:
-                print("ERRO AO APAGAR NO R2:", repr(e))
-
-    db.delete(fatura)
-    db.commit()
-    return {"ok": True}
-
-# =========================
-# ANEXOS (R2)
-# =========================
-
-@app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
-async def upload_anexos(
-    fatura_id: int,
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-):
-    if not (R2_OK and s3):
-        raise HTTPException(
-            status_code=500,
-            detail="R2 não configurado no Render. Configure R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY.",
-        )
-
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-
-    anexos_criados = []
-
-    for file in files:
-        key = _r2_key(fatura_id, file.filename)
-
-        try:
-            content = await file.read()
-            s3.put_object(
-                Bucket=R2_BUCKET_NAME,
-                Key=key,
-                Body=content,
-                ContentType=file.content_type or "application/octet-stream",
-            )
-        except ClientError as e:
-            print("ERRO UPLOAD R2:", repr(e))
-            raise HTTPException(status_code=400, detail="Erro ao enviar anexo para o R2")
-        finally:
-            await file.close()
-
-        anexo_db = AnexoDB(
-            fatura_id=fatura_id,
-            filename=key,  # <<< salva a KEY do R2
-            original_name=file.filename,
-            content_type=file.content_type or "application/octet-stream",
-        )
-        db.add(anexo_db)
-        anexos_criados.append(anexo_db)
-
-    db.commit()
-    return anexos_criados
-
-@app.get("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
-def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
-    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
-    if not fatura:
-        raise HTTPException(status_code=404, detail="Fatura não encontrada")
-    return fatura.anexos
-
-@app.get("/anexos/{anexo_id}")
-def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    if not (R2_OK and s3):
-        raise HTTPException(
-            status_code=500,
-            detail="R2 não configurado no Render.",
-        )
-
-    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
-    if not anexo:
-        raise HTTPException(status_code=404, detail="Anexo não encontrado")
-
-    try:
-        obj = s3.get_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
-        body = obj["Body"]
-        content_type = obj.get("ContentType") or anexo.content_type or "application/octet-stream"
-    except ClientError as e:
-        print("ERRO DOWNLOAD R2:", repr(e))
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado no R2")
-
-    headers = {
-        "Content-Disposition": f'attachment; filename="{anexo.original_name}"'
-    }
-    return StreamingResponse(body, media_type=content_type, headers=headers)
-
-@app.delete("/anexos/{anexo_id}")
-def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    if not (R2_OK and s3):
-        raise HTTPException(
-            status_code=500,
-            detail="R2 não configurado no Render.",
-        )
-
-    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
-    if not anexo:
-        raise HTTPException(status_code=404, detail="Anexo não encontrado")
-
-    # apaga do R2
-    try:
-        s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
-    except ClientError as e:
-        print("ERRO AO APAGAR NO R2:", repr(e))
-
-    # apaga do banco
-    db.delete(anexo)
-    db.commit()
-    return {"ok": True}
-
-# =========================
-# DASHBOARD / EXPORT
-# =========================
-
-@app.get("/dashboard/resumo")
-def resumo_dashboard(
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-    ate_vencimento: Optional[str] = Query(None),
-):
-    """
-    Regra ajustada para bater com o Dashboard (tabela):
-
-    - TOTAL       = soma de todos os valores filtrados
-    - PENDENTES   = todas as faturas com status 'pendente'
-    - ATRASADAS   = faturas com:
-        * status 'atrasado'
-          OU
-        * status 'pendente' e vencimento < próxima quarta
-    - EM DIA      = faturas com status 'pendente' e vencimento == próxima quarta
-    """
-
-    hoje = date.today()
-
-    # próxima quarta-feira (seg=0, ter=1, qua=2)
-    weekday = hoje.weekday()
-    dias_ate_quarta = (2 - weekday) % 7
-    if dias_ate_quarta == 0:
-        dias_ate_quarta = 7
-    prox_quarta = hoje + timedelta(days=dias_ate_quarta)
-
-    query_base = db.query(FaturaDB)
-
-    if transportadora:
-        query_base = query_base.filter(
-            FaturaDB.transportadora.ilike(f"%{transportadora}%")
-        )
-
-    if ate_vencimento:
-        try:
-            filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
-            query_base = query_base.filter(FaturaDB.data_vencimento <= filtro_data)
-        except ValueError:
-            pass
-
-    total = query_base.with_entities(
-        func.coalesce(func.sum(FaturaDB.valor), 0)
-    ).scalar()
-
-    # todas as pendentes (independente de data)
-    pendentes_val = (
-        query_base.filter(FaturaDB.status.ilike("pendente"))
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
-
-    # ATRASADAS:
-    # - status 'atrasado'
-    #   OU
-    # - status 'pendente' e data_vencimento < prox_quarta
-    atrasadas_val = (
-        query_base.filter(
-            or_(
-                FaturaDB.status.ilike("atrasado"),
-                and_(
-                    FaturaDB.status.ilike("pendente"),
-                    FaturaDB.data_vencimento < prox_quarta,
-                ),
-            )
-        )
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
-
-    # EM DIA: pendentes com vencimento == prox_quarta
-    em_dia_val = (
-        query_base.filter(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento == prox_quarta,
-        )
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
-
-    return {
-        "total": float(total or 0),
-        "pendentes": float(pendentes_val or 0),
-        "atrasadas": float(atrasadas_val or 0),
-        "em_dia": float(em_dia_val or 0),
+      const respFat = await fetch(urlF);
+      if (!respFat.ok) throw new Error("Erro ao buscar faturas");
+      lista = await respFat.json();
     }
 
-@app.get("/faturas/exportar")
-def exportar_faturas(
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-    numero_fatura: Optional[str] = Query(None),
-):
-    """
-    Exporta CSV (Excel abre normal).
-    """
-    import csv
-    import io
+    renderResumoDashboard(lista);
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar dashboard");
+  }
+}
 
-    query = db.query(FaturaDB)
-    if transportadora:
-        query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
-    if numero_fatura:
-        query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
+// monta tabela horizontal tipo backlog
+function renderResumoDashboard(lista) {
+  const thead = document.getElementById("theadResumoDashboard");
+  const tbody = document.getElementById("tbodyResumoDashboard");
+  if (!thead || !tbody) return;
 
-    faturas = query.order_by(FaturaDB.id).all()
+  // Hoje zerado
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
 
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
+  // Próxima quarta-feira (getDay: dom=0, seg=1, ter=2, qua=3)
+  const weekday = hoje.getDay();
+  let diasAteQuarta = (3 - weekday + 7) % 7;
+  if (diasAteQuarta === 0) diasAteQuarta = 7;
 
-    writer.writerow(
-        [
-            "ID",
-            "Transportadora",
-            "Responsável",
-            "Número Fatura",
-            "Valor",
-            "Data Vencimento",
-            "Status",
-            "Observação",
-        ]
-    )
+  const proxQuarta = new Date(hoje);
+  proxQuarta.setDate(hoje.getDate() + diasAteQuarta);
+  proxQuarta.setHours(0, 0, 0, 0);
+  const proxQuartaTime = proxQuarta.getTime();
 
-    for f in faturas:
-        writer.writerow(
-            [
-                f.id,
-                f.transportadora,
-                get_responsavel(f.transportadora) or "",
-                str(f.numero_fatura),
-                float(f.valor or 0),
-                f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
-                f.status,
-                f.observacao or "",
-            ]
-        )
-
-    csv_bytes = output.getvalue().encode("utf-8-sig")
-    headers = {
-        "Content-Disposition": 'attachment; filename="faturas.csv"'
+  // considerar TODAS as datas com faturas em aberto (pendente ou atrasado)
+  const datasSet = new Set();
+  lista.forEach((f) => {
+    const statusLower = (f.status || "").toLowerCase();
+    if (statusLower !== "pago" && f.data_vencimento) {
+      datasSet.add(f.data_vencimento);
     }
-    return Response(csv_bytes, media_type="text/csv", headers=headers)
+  });
+
+  const datas = Array.from(datasSet).sort(); // ISO já ordena
+
+  // Cabeçalho
+  let headerHtml = `
+    <tr>
+      <th>Transportadora</th>
+      <th>Total atrasado</th>
+      <th>Total em dia</th>
+      <th>Total geral</th>
+  `;
+  datas.forEach((d) => {
+    headerHtml += `<th>${formatDate(d)}</th>`;
+  });
+  headerHtml += "</tr>";
+  thead.innerHTML = headerHtml;
+
+  // Agrupar por transportadora
+  const grupos = {};
+  lista.forEach((f) => {
+    const transp = f.transportadora || "Sem nome";
+    if (!grupos[transp]) {
+      grupos[transp] = {
+        totalAtrasado: 0,
+        totalEmDia: 0,
+        totalGeral: 0,
+        porData: {},
+      };
+    }
+
+    const valor = Number(f.valor || 0);
+    const statusLower = (f.status || "").toLowerCase();
+
+    // Só conta no dashboard se não estiver pago
+    if (statusLower === "pago") return;
+
+    grupos[transp].totalGeral += valor;
+
+    const d = parseISODateLocal(f.data_vencimento);
+    const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
+
+    if (vencTime !== null) {
+      if (statusLower === "atrasado") {
+        grupos[transp].totalAtrasado += valor;
+      } else if (statusLower === "pendente") {
+        if (vencTime < proxQuartaTime) {
+          grupos[transp].totalAtrasado += valor;
+        } else if (vencTime === proxQuartaTime) {
+          grupos[transp].totalEmDia += valor;
+        }
+      }
+    }
+
+    const key = f.data_vencimento;
+    grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
+  });
+
+  tbody.innerHTML = "";
+
+  let totalGeralAtrasado = 0;
+  let totalGeralEmDia = 0;
+  let totalGeral = 0;
+  const totaisPorData = {};
+
+  Object.entries(grupos).forEach(([transp, g]) => {
+    const tr = document.createElement("tr");
+
+    totalGeralAtrasado += g.totalAtrasado;
+    totalGeralEmDia += g.totalEmDia;
+    totalGeral += g.totalGeral;
+
+    datas.forEach((d) => {
+      const v = g.porData[d] || 0;
+      totaisPorData[d] = (totaisPorData[d] || 0) + v;
+    });
+
+    let html = `
+      <td>${transp}</td>
+      <td>${formatCurrency(g.totalAtrasado)}</td>
+      <td>${formatCurrency(g.totalEmDia)}</td>
+      <td>${formatCurrency(g.totalGeral)}</td>
+    `;
+    datas.forEach((d) => {
+      const val = g.porData[d] || 0;
+      html += `<td>${val ? formatCurrency(val) : "-"}</td>`;
+    });
+
+    tr.innerHTML = html;
+    tbody.appendChild(tr);
+  });
+
+  // linha total
+  if (Object.keys(grupos).length > 0) {
+    const trTotal = document.createElement("tr");
+    let html = `
+      <td><strong>Total geral</strong></td>
+      <td><strong>${formatCurrency(totalGeralAtrasado)}</strong></td>
+      <td><strong>${formatCurrency(totalGeralEmDia)}</strong></td>
+      <td><strong>${formatCurrency(totalGeral)}</strong></td>
+    `;
+    datas.forEach((d) => {
+      const v = totaisPorData[d] || 0;
+      html += `<td><strong>${v ? formatCurrency(v) : "-"}</strong></td>`;
+    });
+    trTotal.innerHTML = html;
+    tbody.appendChild(trTotal);
+  }
+}
+
+// ============ FATURAS (LISTA + RESUMO) ============
+
+async function carregarFaturas() {
+  try {
+    const params = new URLSearchParams();
+    if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
+    if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
+
+    const url =
+      params.toString().length > 0
+        ? `${API_BASE}/faturas?${params.toString()}`
+        : `${API_BASE}/faturas`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("Erro ao listar faturas");
+
+    const faturas = await resp.json();
+    ultimaListaFaturas = faturas;
+
+    renderizarFaturas();
+    carregarDashboard();
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar faturas");
+  }
+}
+
+function renderizarFaturas() {
+  const tbody = document.getElementById("tbodyFaturas");
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+
+  let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
+
+  // Filtro período (apenas aba Faturas)
+  if (filtroDataInicioFaturas || filtroDataFimFaturas) {
+    lista = lista.filter((f) => {
+      if (!f.data_vencimento) return false;
+      const d = parseISODateLocal(f.data_vencimento);
+      if (!d) return false;
+      const time = d.setHours(0, 0, 0, 0);
+
+      if (filtroDataInicioFaturas) {
+        const dIni = parseISODateLocal(filtroDataInicioFaturas);
+        if (!dIni) return false;
+        const ini = dIni.setHours(0, 0, 0, 0);
+        if (time < ini) return false;
+      }
+
+      if (filtroDataFimFaturas) {
+        const dFim = parseISODateLocal(filtroDataFimFaturas);
+        if (!dFim) return false;
+        const fim = dFim.setHours(0, 0, 0, 0);
+        if (time > fim) return false;
+      }
+
+      return true;
+    });
+  }
+
+  // Filtro status (aba Faturas)
+  if (filtroStatus) {
+    const alvo = filtroStatus.toLowerCase();
+    lista = lista.filter((f) => (f.status || "").toLowerCase() === alvo);
+  }
+
+  // RESUMO (cards da aba Faturas)
+  let total = 0;
+  let pendentes = 0;
+  let atrasadas = 0;
+  let pagas = 0;
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const hojeTime = hoje.getTime();
+
+  lista.forEach((f) => {
+    const valor = Number(f.valor || 0);
+    total += valor;
+
+    const status = (f.status || "").toLowerCase();
+    const d = parseISODateLocal(f.data_vencimento);
+    const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
+
+    if (status === "pago") {
+      pagas += valor;
+    } else if (status === "pendente") {
+      if (vencTime !== null && vencTime < hojeTime) atrasadas += valor;
+      else pendentes += valor;
+    } else if (status === "atrasado") {
+      atrasadas += valor;
+    }
+  });
+
+  const elTotal = document.getElementById("fatTotal");
+  const elPend = document.getElementById("fatPendentes");
+  const elAtr = document.getElementById("fatAtrasadas");
+  const elPag = document.getElementById("fatPagas");
+  if (elTotal) elTotal.textContent = formatCurrency(total);
+  if (elPend) elPend.textContent = formatCurrency(pendentes);
+  if (elAtr) elAtr.textContent = formatCurrency(atrasadas);
+  if (elPag) elPag.textContent = formatCurrency(pagas);
+
+  // TABELA
+  if (lista.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 9;
+    td.textContent = "Nenhuma fatura encontrada.";
+    td.style.textAlign = "center";
+    td.style.padding = "12px";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  // IMPORTANTE: sem listeners por linha — só render
+  lista.forEach((f) => {
+    const tr = document.createElement("tr");
+    tr.dataset.faturaId = f.id;
+
+    tr.innerHTML = `
+      <td>${f.id}</td>
+      <td>${f.transportadora}</td>
+      <td>${f.responsavel ?? ""}</td>
+      <td>${f.numero_fatura}</td>
+      <td>${formatCurrency(f.valor)}</td>
+      <td>${formatDate(f.data_vencimento)}</td>
+      <td>${f.status}</td>
+      <td>${f.observacao ?? ""}</td>
+      <td class="acoes">
+        <button type="button" class="menu-btn" aria-label="Ações">⋮</button>
+        <div class="menu-dropdown">
+          <button type="button" data-acao="editar">Editar</button>
+          <button type="button" data-acao="excluir">Excluir</button>
+          <button type="button" data-acao="anexos">Anexos</button>
+        </div>
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+  });
+}
+
+// ============ MENU 3 PONTINHOS (DELEGAÇÃO) ============
+
+function fecharTodosMenus() {
+  document.querySelectorAll(".menu-dropdown.ativo").forEach((m) => {
+    m.classList.remove("ativo");
+    // reset das posições que vamos aplicar via JS
+    m.style.position = "";
+    m.style.left = "";
+    m.style.top = "";
+    m.style.right = "";
+    m.style.bottom = "";
+    m.style.maxHeight = "";
+    m.style.overflowY = "";
+  });
+}
+
+function setupMenuDelegation() {
+  const tbody = document.getElementById("tbodyFaturas");
+  if (!tbody) return;
+
+  tbody.addEventListener("click", async (e) => {
+    const menuBtn = e.target.closest(".menu-btn");
+    const acaoBtn = e.target.closest(".menu-dropdown button[data-acao]");
+
+    // abrir/fechar menu
+    if (menuBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // se esse menu já estava aberto, fecha e sai
+      const acoesCell = menuBtn.closest(".acoes");
+      const dropdown = acoesCell ? acoesCell.querySelector(".menu-dropdown") : null;
+      const jaAberto = dropdown && dropdown.classList.contains("ativo");
+
+      fecharTodosMenus();
+      if (!dropdown || jaAberto) return;
+
+      // abre
+      dropdown.classList.add("ativo");
+
+      // Posicionamento inteligente (mobile/desktop)
+      const btnRect = menuBtn.getBoundingClientRect();
+
+      // Força medir altura real do dropdown
+      dropdown.style.position = "fixed";
+      dropdown.style.left = "0px";
+      dropdown.style.top = "0px";
+
+      const dropRect = dropdown.getBoundingClientRect();
+      const dropH = dropRect.height || 180;
+
+      const margem = 8;
+      const spaceBelow = window.innerHeight - btnRect.bottom;
+      const spaceAbove = btnRect.top;
+
+      // alinha na direita do botão
+      const left = Math.max(margem, btnRect.right - dropRect.width);
+
+      dropdown.style.left = `${left}px`;
+
+      if (spaceBelow >= dropH + margem) {
+        dropdown.style.top = `${btnRect.bottom + margem}px`;
+      } else if (spaceAbove >= dropH + margem) {
+        dropdown.style.top = `${btnRect.top - dropH - margem}px`;
+      } else {
+        if (spaceBelow >= spaceAbove) {
+          dropdown.style.top = `${btnRect.bottom + margem}px`;
+          dropdown.style.maxHeight = `${Math.max(120, spaceBelow - 2 * margem)}px`;
+        } else {
+          dropdown.style.top = `${margem}px`;
+          dropdown.style.maxHeight = `${Math.max(120, spaceAbove - 2 * margem)}px`;
+        }
+        dropdown.style.overflowY = "auto";
+      }
+
+      return;
+    }
+
+    // clicar em uma ação do dropdown
+    if (acaoBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const acao = acaoBtn.dataset.acao;
+      const tr = acaoBtn.closest("tr");
+      const id = tr ? tr.dataset.faturaId : null;
+      if (!id) return;
+
+      const faturaObj = (ultimaListaFaturas || []).find(
+        (f) => String(f.id) === String(id)
+      );
+
+      if (acao === "excluir") {
+        await excluirFatura(id);
+      } else if (acao === "editar") {
+        if (faturaObj) preencherFormularioEdicao(faturaObj);
+      } else if (acao === "anexos") {
+        abrirModalAnexos(id);
+      }
+
+      fecharTodosMenus();
+    }
+  });
+
+  // clique fora fecha
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".menu-dropdown") || e.target.closest(".menu-btn")) return;
+    fecharTodosMenus();
+  });
+
+  // ESC fecha
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") fecharTodosMenus();
+  });
+}
+
+// ============ EXCLUIR / EDITAR / ANEXOS ============
+
+async function excluirFatura(id) {
+  if (!confirm(`Excluir fatura ${id}?`)) return;
+
+  try {
+    const resp = await fetch(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error("Erro ao excluir");
+    await carregarFaturas();
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao excluir fatura");
+  }
+}
+
+function preencherFormularioEdicao(f) {
+  ativarAba("cadastro");
+  document.getElementById("inputTransportadora").value = f.transportadora;
+  document.getElementById("inputNumeroFatura").value = f.numero_fatura;
+  document.getElementById("inputValor").value = f.valor;
+  document.getElementById("inputVencimento").value = f.data_vencimento;
+  document.getElementById("inputStatus").value = f.status;
+  document.getElementById("inputObservacao").value = f.observacao ?? "";
+  document.getElementById("formFatura").dataset.editId = f.id;
+}
+
+// >>>>> MODAL ANEXOS (COM EXCLUIR) <<<<<
+async function abrirModalAnexos(faturaId) {
+  document.getElementById("modalFaturaId").textContent = faturaId;
+  const lista = document.getElementById("listaAnexos");
+  lista.innerHTML = "Carregando...";
+
+  try {
+    const resp = await fetch(`${API_BASE}/faturas/${faturaId}/anexos`);
+    if (!resp.ok) throw new Error("Erro ao listar anexos");
+    const anexos = await resp.json();
+
+    if (!anexos.length) {
+      lista.innerHTML = "<li>Sem anexos.</li>";
+    } else {
+      lista.innerHTML = "";
+
+      anexos.forEach((a) => {
+        const li = document.createElement("li");
+
+        // link download
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/anexos/${a.id}`;
+        link.target = "_blank";
+        link.textContent = a.original_name;
+
+        // botão excluir
+        const btnExcluir = document.createElement("button");
+        btnExcluir.type = "button";
+        btnExcluir.className = "btn-excluir-anexo";
+        btnExcluir.textContent = "Excluir";
+
+        btnExcluir.addEventListener("click", async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (!confirm(`Excluir o anexo "${a.original_name}"?`)) return;
+
+          try {
+            const respDel = await fetch(`${API_BASE}/anexos/${a.id}`, {
+              method: "DELETE",
+            });
+            if (!respDel.ok) throw new Error("Erro ao excluir anexo");
+
+            // recarrega lista após excluir
+            abrirModalAnexos(faturaId);
+          } catch (err) {
+            console.error(err);
+            alert("Erro ao excluir anexo");
+          }
+        });
+
+        li.appendChild(link);
+        li.appendChild(btnExcluir);
+        lista.appendChild(li);
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    lista.innerHTML = "<li>Erro ao carregar anexos.</li>";
+  }
+
+  document.getElementById("modalAnexos").classList.add("open");
+}
+
+// ============ FORMULÁRIO ============
+
+async function salvarFatura(e) {
+  e.preventDefault();
+
+  const form = document.getElementById("formFatura");
+  const editId = form.dataset.editId || null;
+
+  const payload = {
+    transportadora: document.getElementById("inputTransportadora").value,
+    numero_fatura: document.getElementById("inputNumeroFatura").value,
+    valor: parseFloat(document.getElementById("inputValor").value || "0"),
+    data_vencimento: document.getElementById("inputVencimento").value,
+    status: document.getElementById("inputStatus").value,
+    observacao: document.getElementById("inputObservacao").value || null,
+  };
+
+  try {
+    let resp;
+
+    if (editId) {
+      resp = await fetch(`${API_BASE}/faturas/${editId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      resp = await fetch(`${API_BASE}/faturas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    if (!resp.ok) throw new Error("Erro ao salvar fatura");
+
+    const fatura = await resp.json();
+
+    // upload anexos, se houver
+    const inputAnexos = document.getElementById("inputAnexos");
+    if (inputAnexos && inputAnexos.files && inputAnexos.files.length > 0) {
+      const fd = new FormData();
+      for (const file of inputAnexos.files) {
+        fd.append("files", file);
+      }
+
+      const respAnexos = await fetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
+        method: "POST",
+        body: fd,
+      });
+
+      // ✅ AQUI É A CORREÇÃO: se falhar, mostrar o motivo
+      if (!respAnexos.ok) {
+        let detalhe = "";
+        try {
+          const ct = respAnexos.headers.get("content-type") || "";
+          if (ct.includes("application/json")) {
+            const j = await respAnexos.json();
+            detalhe = j?.detail ? String(j.detail) : JSON.stringify(j);
+          } else {
+            detalhe = await respAnexos.text();
+          }
+        } catch (_) {
+          detalhe = "";
+        }
+
+        console.error("Erro ao enviar anexos:", respAnexos.status, detalhe);
+        alert(
+          `A fatura foi salva, mas o upload do anexo FALHOU.\n\nStatus: ${respAnexos.status}\n${detalhe || ""}`
+        );
+      } else {
+        // se deu certo, limpa o input
+        inputAnexos.value = "";
+      }
+    }
+
+    form.reset();
+    delete form.dataset.editId;
+
+    await carregarFaturas();
+    ativarAba("faturas");
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao salvar fatura");
+  }
+}
+
+// ============ ABAS / NAVEGAÇÃO ============
+
+function ativarAba(aba) {
+  const dash = document.getElementById("dashboardSection");
+  const cad = document.getElementById("cadastroSection");
+  const fat = document.getElementById("faturasSection");
+  const tabDash = document.getElementById("tabDashboard");
+  const tabCad = document.getElementById("tabCadastro");
+  const tabFat = document.getElementById("tabFaturas");
+
+  [dash, cad, fat].forEach((s) => s.classList.remove("visible"));
+  [tabDash, tabCad, tabFat].forEach((t) => t.classList.remove("active"));
+
+  if (aba === "dashboard") {
+    dash.classList.add("visible");
+    tabDash.classList.add("active");
+  } else if (aba === "cadastro") {
+    cad.classList.add("visible");
+    tabCad.classList.add("active");
+  } else {
+    fat.classList.add("visible");
+    tabFat.classList.add("active");
+  }
+}
+
+// ============ EXPORTAR EXCEL (CSV) ============
+
+function exportarExcel() {
+  const params = new URLSearchParams();
+  if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+  if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
+
+  const url =
+    params.toString().length > 0
+      ? `${API_BASE}/faturas/exportar?${params.toString()}`
+      : `${API_BASE}/faturas/exportar`;
+
+  window.open(url, "_blank");
+}
+
+// ============ INIT ============
+
+document.addEventListener("DOMContentLoaded", () => {
+  // setup do menu 3 pontinhos (IMPORTANTE)
+  setupMenuDelegation();
+
+  // Abas
+  document.getElementById("tabDashboard").addEventListener("click", () => ativarAba("dashboard"));
+  document.getElementById("tabCadastro").addEventListener("click", () => ativarAba("cadastro"));
+  document.getElementById("tabFaturas").addEventListener("click", () => ativarAba("faturas"));
+
+  // Botão página inicial
+  document.getElementById("btnHome").addEventListener("click", () => {
+    filtroTransportadora = "";
+    filtroVencimento = "";
+    filtroNumeroFatura = "";
+    filtroDataInicioFaturas = "";
+    filtroDataFimFaturas = "";
+    filtroStatus = "";
+
+    const filtroVencInput = document.getElementById("filtroVencimento");
+    if (filtroVencInput) filtroVencInput.value = "";
+
+    const buscaNumero = document.getElementById("buscaNumero");
+    if (buscaNumero) buscaNumero.value = "";
+
+    const ini = document.getElementById("filtroDataInicioFaturas");
+    const fim = document.getElementById("filtroDataFimFaturas");
+    if (ini) ini.value = "";
+    if (fim) fim.value = "";
+
+    const statusSelect = document.getElementById("filtroStatus");
+    if (statusSelect) statusSelect.value = "";
+
+    document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
+
+    ativarAba("dashboard");
+    carregarFaturas();
+  });
+
+  // Transportadoras sidebar
+  document.querySelectorAll(".transportadora-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      filtroTransportadora = btn.dataset.transportadora || "";
+      document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      carregarFaturas();
+    })
+  );
+
+  // Filtro por vencimento sidebar
+  const filtroVencInput = document.getElementById("filtroVencimento");
+  if (filtroVencInput) {
+    filtroVencInput.addEventListener("change", (e) => {
+      filtroVencimento = e.target.value;
+      carregarFaturas();
+    });
+  }
+
+  // Limpar filtros
+  const btnLimparFiltros = document.getElementById("btnLimparFiltros");
+  if (btnLimparFiltros) {
+    btnLimparFiltros.addEventListener("click", () => {
+      filtroVencimento = "";
+      filtroNumeroFatura = "";
+      filtroDataInicioFaturas = "";
+      filtroDataFimFaturas = "";
+      filtroStatus = "";
+
+      if (filtroVencInput) filtroVencInput.value = "";
+      const buscaNumero = document.getElementById("buscaNumero");
+      if (buscaNumero) buscaNumero.value = "";
+
+      const ini = document.getElementById("filtroDataInicioFaturas");
+      const fim = document.getElementById("filtroDataFimFaturas");
+      if (ini) ini.value = "";
+      if (fim) fim.value = "";
+
+      const statusSelect = document.getElementById("filtroStatus");
+      if (statusSelect) statusSelect.value = "";
+
+      carregarFaturas();
+    });
+  }
+
+  // Busca nº fatura (pesquisa)
+  const buscaNumero = document.getElementById("buscaNumero");
+  if (buscaNumero) {
+    buscaNumero.addEventListener("input", (e) => {
+      filtroNumeroFatura = e.target.value.trim();
+      carregarFaturas();
+    });
+  }
+
+  // Filtro por período da aba Faturas
+  const ini = document.getElementById("filtroDataInicioFaturas");
+  const fim = document.getElementById("filtroDataFimFaturas");
+  if (ini) {
+    ini.addEventListener("change", (e) => {
+      filtroDataInicioFaturas = e.target.value;
+      renderizarFaturas();
+    });
+  }
+  if (fim) {
+    fim.addEventListener("change", (e) => {
+      filtroDataFimFaturas = e.target.value;
+      renderizarFaturas();
+    });
+  }
+
+  // Filtro por STATUS (aba faturas)
+  const statusSelect = document.getElementById("filtroStatus");
+  if (statusSelect) {
+    statusSelect.addEventListener("change", (e) => {
+      filtroStatus = e.target.value;
+      renderizarFaturas();
+    });
+  }
+
+  // Atualizar lista manualmente
+  const btnAtualizar = document.getElementById("btnAtualizarFaturas");
+  if (btnAtualizar) {
+    btnAtualizar.addEventListener("click", (e) => {
+      e.preventDefault();
+      carregarFaturas();
+    });
+  }
+
+  // Exportar Excel
+  const btnExportar = document.getElementById("btnExportarExcel");
+  if (btnExportar) btnExportar.addEventListener("click", exportarExcel);
+
+  // Formulário
+  document.getElementById("formFatura").addEventListener("submit", salvarFatura);
+
+  // Modal anexos
+  document.getElementById("modalFechar").addEventListener("click", () =>
+    document.getElementById("modalAnexos").classList.remove("open")
+  );
+  document.getElementById("modalAnexos").addEventListener("click", (e) => {
+    if (e.target.id === "modalAnexos") {
+      document.getElementById("modalAnexos").classList.remove("open");
+    }
+  });
+
+  // Primeira carga
+  carregarFaturas();
+});
