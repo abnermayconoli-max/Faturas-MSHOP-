@@ -33,6 +33,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
 import boto3  # <<< NOVO (R2)
 from botocore.exceptions import ClientError  # <<< NOVO (R2)
+from botocore.config import Config  # <<< NOVO (R2)  ✅ ALTERAÇÃO
 
 # =========================
 # CONFIG BANCO DE DADOS
@@ -59,17 +60,24 @@ R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 
-R2_OK = all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY])
-
-s3 = None
-if R2_OK:
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-        region_name="auto",
+if not all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY]):
+    raise RuntimeError(
+        "R2 não configurado. Verifique as env vars: "
+        "R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
     )
+
+# ✅ ALTERAÇÃO: força S3v4 + path style (mais compatível com R2)
+s3 = boto3.client(
+    "s3",
+    endpoint_url=R2_ENDPOINT,
+    aws_access_key_id=R2_ACCESS_KEY_ID,
+    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+    region_name="auto",
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "path"},
+    ),
+)
 
 def _r2_key(fatura_id: int, original_filename: str) -> str:
     safe_name = (original_filename or "arquivo").replace("/", "_").replace("\\", "_")
@@ -301,20 +309,19 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # Remove arquivos do R2
-    if R2_OK and s3:
-        for anexo in fatura.anexos:
-            try:
-                s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
-            except ClientError as e:
-                print("ERRO AO APAGAR NO R2:", repr(e))
+    # Remove arquivos do R2 (em vez do disco)
+    for anexo in fatura.anexos:
+        try:
+            s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+        except ClientError as e:
+            print("ERRO AO APAGAR NO R2:", repr(e))
 
     db.delete(fatura)
     db.commit()
     return {"ok": True}
 
 # =========================
-# ANEXOS (R2)
+# ANEXOS
 # =========================
 
 @app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
@@ -323,12 +330,6 @@ async def upload_anexos(
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-    if not (R2_OK and s3):
-        raise HTTPException(
-            status_code=500,
-            detail="R2 não configurado no Render. Configure R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY.",
-        )
-
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
@@ -346,9 +347,18 @@ async def upload_anexos(
                 Body=content,
                 ContentType=file.content_type or "application/octet-stream",
             )
+
+        # ✅ ALTERAÇÃO: mostra o erro real (Code/Message)
         except ClientError as e:
-            print("ERRO UPLOAD R2:", repr(e))
-            raise HTTPException(status_code=400, detail="Erro ao enviar anexo para o R2")
+            err = getattr(e, "response", {}) or {}
+            code = (((err.get("Error") or {}).get("Code")) or "")
+            msg = (((err.get("Error") or {}).get("Message")) or "")
+            print("ERRO UPLOAD R2:", repr(e), "CODE=", code, "MSG=", msg)
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"Erro ao enviar anexo para o R2: {code} - {msg}".strip(" -")
+            )
         finally:
             await file.close()
 
@@ -373,12 +383,6 @@ def listar_anexos(fatura_id: int, db: Session = Depends(get_db)):
 
 @app.get("/anexos/{anexo_id}")
 def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    if not (R2_OK and s3):
-        raise HTTPException(
-            status_code=500,
-            detail="R2 não configurado no Render.",
-        )
-
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
@@ -398,12 +402,6 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/anexos/{anexo_id}")
 def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
-    if not (R2_OK and s3):
-        raise HTTPException(
-            status_code=500,
-            detail="R2 não configurado no Render.",
-        )
-
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
@@ -468,17 +466,12 @@ def resumo_dashboard(
         func.coalesce(func.sum(FaturaDB.valor), 0)
     ).scalar()
 
-    # todas as pendentes (independente de data)
     pendentes_val = (
         query_base.filter(FaturaDB.status.ilike("pendente"))
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
-    # ATRASADAS:
-    # - status 'atrasado'
-    #   OU
-    # - status 'pendente' e data_vencimento < prox_quarta
     atrasadas_val = (
         query_base.filter(
             or_(
@@ -493,7 +486,6 @@ def resumo_dashboard(
         .scalar()
     )
 
-    # EM DIA: pendentes com vencimento == prox_quarta
     em_dia_val = (
         query_base.filter(
             FaturaDB.status.ilike("pendente"),
