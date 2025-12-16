@@ -77,28 +77,37 @@ async function carregarDashboard() {
 
     const dataResumo = await respResumo.json();
 
-    // ✅ ids novos do HTML
+    // ✅ ids do HTML
     const elTotalGeral = document.getElementById("cardTotalGeral");
     const elEmDia = document.getElementById("cardEmDia");
     const elAtrasado = document.getElementById("cardAtrasado");
     const elPago = document.getElementById("cardPago");
     const boxPago = document.getElementById("cardPagoBox");
 
+    // ===========================
+    // ✅ CORREÇÃO: nomes vindos do backend
+    // backend retorna:
+    // { total, pendentes, atrasadas, em_dia }
+    // ===========================
+
     if (dashboardModo === "pendente") {
       if (boxPago) boxPago.style.display = "none";
 
-      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_geral);
-      if (elEmDia) elEmDia.textContent = formatCurrency(dataResumo.total_em_dia);
-      if (elAtrasado) elAtrasado.textContent = formatCurrency(dataResumo.total_atrasado);
-      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago);
+      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total);
+      if (elEmDia) elEmDia.textContent = formatCurrency(dataResumo.em_dia);
+      if (elAtrasado) elAtrasado.textContent = formatCurrency(dataResumo.atrasadas);
+
+      // (card pago não existe no backend do resumo, então fica zerado)
+      if (elPago) elPago.textContent = formatCurrency(0);
     } else {
-      // ✅ modo PAGO: mostra o card pago e "foca" nele
+      // ✅ modo PAGO: hoje o backend /dashboard/resumo não retorna "pago"
+      // (se quiser, depois eu ajusto o backend para retornar)
       if (boxPago) boxPago.style.display = "block";
 
-      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_pago);
+      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(0);
       if (elEmDia) elEmDia.textContent = formatCurrency(0);
       if (elAtrasado) elAtrasado.textContent = formatCurrency(0);
-      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago);
+      if (elPago) elPago.textContent = formatCurrency(0);
     }
 
     // 2) Tabela "Resumo por transportadora" usando a lista de faturas
