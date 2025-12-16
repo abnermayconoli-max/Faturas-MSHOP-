@@ -67,54 +67,50 @@
   <main class="main">
     <!-- ABAS -->
     <div class="tabs">
-      <button id="tabDashboard" class="tab active">Dashboard</button>
+      <button id="tabDashboard" class="tab active">Painel</button>
       <button id="tabCadastro" class="tab">Cadastro</button>
       <button id="tabFaturas" class="tab">Faturas</button>
     </div>
 
     <!-- DASHBOARD -->
     <section id="dashboardSection" class="section visible">
-
-      <!-- ✅ HEADER COM BOTÕES NO LUGAR CERTO -->
       <div class="dash-header">
         <h2>Resumo geral</h2>
 
+        <!-- ✅ botões agora ao lado do "Resumo geral" -->
         <div class="dashboard-modo">
-          <button id="btnDashboardPendente" type="button" class="chip active">
-            Pendente
-          </button>
-          <button id="btnDashboardPago" type="button" class="chip">
-            Pago
-          </button>
+          <button id="btnDashboardPendente" type="button" class="chip active">Pendente</button>
+          <button id="btnDashboardPago" type="button" class="chip">Pago</button>
         </div>
       </div>
 
-      <div class="cards">
-        <div class="card">
+      <div class="cards" id="cardsDashboard">
+        <!-- ✅ ids para esconder/mostrar no JS -->
+        <div class="card" id="cardTotalGeralBox">
           <h3>Total Geral</h3>
           <p id="cardTotalGeral">R$ 0,00</p>
         </div>
 
-        <div class="card">
+        <div class="card" id="cardEmDiaBox">
           <h3>Total em Dia</h3>
           <p id="cardEmDia">R$ 0,00</p>
         </div>
 
-        <div class="card">
+        <div class="card" id="cardAtrasadoBox">
           <h3>Total Atrasado</h3>
           <p id="cardAtrasado">R$ 0,00</p>
         </div>
 
-        <!-- aparece apenas no modo PAGO -->
+        <!-- ✅ só aparece no modo PAGO -->
         <div class="card" id="cardPagoBox" style="display:none;">
           <h3>Total Pago</h3>
           <p id="cardPago">R$ 0,00</p>
         </div>
       </div>
 
-      <!-- RESUMO POR TRANSPORTADORA -->
+      <!-- RESUMO POR TRANSPORTADORA / BACKLOG -->
       <section class="table-section dashboard-table">
-        <h2>Resumo por transportadora</h2>
+        <h2 id="tituloResumoDashboard">Resumo por transportadora</h2>
         <table class="tabela">
           <thead id="theadResumoDashboard"></thead>
           <tbody id="tbodyResumoDashboard"></tbody>
@@ -177,12 +173,14 @@
 
         <div class="field-group">
           <label>Período (vencimento):</label>
+
           <div class="date-range-line">
             <div class="date-range">
               <input type="date" id="filtroDataInicioFaturas" />
               <span>a</span>
               <input type="date" id="filtroDataFimFaturas" />
             </div>
+
             <button id="btnLimparPeriodoFaturas" type="button" class="btn-warn">
               Limpar filtro
             </button>
@@ -232,17 +230,17 @@
         <h2>Faturas</h2>
         <table class="tabela">
           <thead>
-            <tr>
-              <th>ID</th>
-              <th>Transportadora</th>
-              <th>Responsável</th>
-              <th>Nº Fatura</th>
-              <th>Valor</th>
-              <th>Vencimento</th>
-              <th>Status</th>
-              <th>Observação</th>
-              <th>Ações</th>
-            </tr>
+          <tr>
+            <th>ID</th>
+            <th>Transportadora</th>
+            <th>Responsável</th>
+            <th>Nº Fatura</th>
+            <th>Valor</th>
+            <th>Vencimento</th>
+            <th>Status</th>
+            <th>Observação</th>
+            <th>Ações</th>
+          </tr>
           </thead>
           <tbody id="tbodyFaturas"></tbody>
         </table>
