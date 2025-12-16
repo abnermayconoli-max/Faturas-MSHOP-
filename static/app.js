@@ -5,7 +5,8 @@ const API_BASE = "";
 
 // Filtros globais (sidebar + busca)
 let filtroTransportadora = "";
-let filtroVencimento = "";
+let filtroVencimentoDe = "";
+let filtroVencimentoAte = "";
 let filtroNumeroFatura = "";
 
 // Filtros só da aba Faturas
@@ -59,7 +60,8 @@ async function carregarDashboard() {
   try {
     const params = new URLSearchParams();
     if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
-    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
+    if (filtroVencimentoDe) params.append("de_vencimento", filtroVencimentoDe);
+    if (filtroVencimentoAte) params.append("ate_vencimento", filtroVencimentoAte);
 
     // 1) Resumo geral (cards) via API
     const urlResumo =
@@ -241,7 +243,8 @@ async function carregarFaturas() {
   try {
     const params = new URLSearchParams();
     if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
-    if (filtroVencimento) params.append("ate_vencimento", filtroVencimento);
+    if (filtroVencimentoDe) params.append("de_vencimento", filtroVencimentoDe);
+    if (filtroVencimentoAte) params.append("ate_vencimento", filtroVencimentoAte);
     if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
 
     const url =
@@ -728,14 +731,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // Botão página inicial
   document.getElementById("btnHome").addEventListener("click", () => {
     filtroTransportadora = "";
-    filtroVencimento = "";
+    filtroVencimentoDe = "";
+    filtroVencimentoAte = "";
     filtroNumeroFatura = "";
     filtroDataInicioFaturas = "";
     filtroDataFimFaturas = "";
     filtroStatus = "";
 
-    const filtroVencInput = document.getElementById("filtroVencimento");
-    if (filtroVencInput) filtroVencInput.value = "";
+    const filtroVencDe = document.getElementById("filtroVencimentoDe");
+    const filtroVencAte = document.getElementById("filtroVencimentoAte");
+    if (filtroVencDe) filtroVencDe.value = "";
+    if (filtroVencAte) filtroVencAte.value = "";
 
     const buscaNumero = document.getElementById("buscaNumero");
     if (buscaNumero) buscaNumero.value = "";
@@ -764,11 +770,19 @@ document.addEventListener("DOMContentLoaded", () => {
     })
   );
 
-  // Filtro por vencimento sidebar
-  const filtroVencInput = document.getElementById("filtroVencimento");
-  if (filtroVencInput) {
-    filtroVencInput.addEventListener("change", (e) => {
-      filtroVencimento = e.target.value;
+  const filtroVencDe = document.getElementById("filtroVencimentoDe");
+  const filtroVencAte = document.getElementById("filtroVencimentoAte");
+
+  // Filtro por vencimento sidebar (DE / ATÉ)
+  if (filtroVencDe) {
+    filtroVencDe.addEventListener("change", (e) => {
+      filtroVencimentoDe = e.target.value;
+      carregarFaturas();
+    });
+  }
+  if (filtroVencAte) {
+    filtroVencAte.addEventListener("change", (e) => {
+      filtroVencimentoAte = e.target.value;
       carregarFaturas();
     });
   }
@@ -777,13 +791,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnLimparFiltros = document.getElementById("btnLimparFiltros");
   if (btnLimparFiltros) {
     btnLimparFiltros.addEventListener("click", () => {
-      filtroVencimento = "";
+      filtroVencimentoDe = "";
+      filtroVencimentoAte = "";
       filtroNumeroFatura = "";
       filtroDataInicioFaturas = "";
       filtroDataFimFaturas = "";
       filtroStatus = "";
 
-      if (filtroVencInput) filtroVencInput.value = "";
+      if (filtroVencDe) filtroVencDe.value = "";
+      if (filtroVencAte) filtroVencAte.value = "";
+
       const buscaNumero = document.getElementById("buscaNumero");
       if (buscaNumero) buscaNumero.value = "";
 
