@@ -493,3 +493,33 @@ button.secondary:hover {
 #listaAnexos a:hover {
   text-decoration: underline;
 }
+
+/* ========== DATE RANGE SIDEBAR (DE / ATÉ) ========== */
+.date-range-sidebar {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.date-field label {
+  display: block;
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 0 0 6px 6px;
+}
+
+/* botao excluir anexo */
+.btn-excluir-anexo {
+  margin-left: 10px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  border: 1px solid #374151;
+  background: #111827;
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn-excluir-anexo:hover {
+  background: #1f2937;
+}
