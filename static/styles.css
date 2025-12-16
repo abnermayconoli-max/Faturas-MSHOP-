@@ -132,19 +132,31 @@ body {
   margin-bottom: 16px;
 }
 
-/* ✅ header do dashboard com botões no canto */
+/* ✅ ALTERAÇÃO AQUI:
+   Header do dashboard agora segura o título + botões "Pendente/Pago"
+   no mesmo alinhamento (igual seu print)
+*/
 .dash-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 6px; /* ✅ só pra dar um respiro antes dos cards */
 }
 
+/* ✅ garante que o H2 e o grupo de botões "encaixem" bem */
+.dash-header > h2 {
+  margin-bottom: 0; /* ✅ evita o H2 empurrar pra baixo */
+}
+
+/* ✅ seu container dos botões */
 .dashboard-modo {
   display: flex;
   gap: 8px;
+  align-items: center;
 }
 
+/* ✅ seus chips (mantidos) */
 .chip {
   border-radius: 999px;
   padding: 7px 12px;
@@ -223,6 +235,12 @@ body {
   }
   .cards {
     grid-template-columns: 1fr;
+  }
+
+  /* ✅ no mobile: botões podem quebrar linha sem bagunçar */
+  .dash-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
 }
 
