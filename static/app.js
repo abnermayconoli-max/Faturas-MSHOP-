@@ -138,10 +138,12 @@ function renderResumoDashboardPendente(lista) {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
 
-  // Próxima quarta-feira (dom=0, seg=1, ter=2, qua=3)
+  // ✅ ALTERAÇÃO: Próxima quarta-feira COM CORTE (dom=0, seg=1, ter=2, qua=3)
+  // Se faltar 0, 1 ou 2 dias pra quarta, pula para a próxima (+7)
   const weekday = hoje.getDay();
   let diasAteQuarta = (3 - weekday + 7) % 7;
-  if (diasAteQuarta === 0) diasAteQuarta = 7;
+
+  if (diasAteQuarta <= 2) diasAteQuarta += 7;
 
   const proxQuarta = new Date(hoje);
   proxQuarta.setDate(hoje.getDate() + diasAteQuarta);
@@ -204,7 +206,7 @@ function renderResumoDashboardPendente(lista) {
       if (statusLower === "atrasado") {
         grupos[transp].totalAtrasado += valor;
       } else if (statusLower === "pendente") {
-        // regra do teu layout: antes da próxima quarta = atrasado, a partir da próxima quarta = em dia
+        // regra do teu layout: antes da próxima quarta (COM CORTE) = atrasado, a partir = em dia
         if (vencTime < proxQuartaTime) grupos[transp].totalAtrasado += valor;
         else grupos[transp].totalEmDia += valor;
       }
