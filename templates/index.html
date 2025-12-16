@@ -1,260 +1,410 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <title>Faturas MSHOP</title>
-  <link rel="stylesheet" href="/static/styles.css" />
-</head>
-<body>
-<div class="layout">
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-    <h1 class="logo">Faturas MSHOP</h1>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-    <button id="btnHome" class="sidebar-btn primary">
-      Página inicial
-    </button>
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #020617;
+  color: #e5e7eb;
+}
 
-    <div class="sidebar-section">
-      <h2>Transportadoras</h2>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="">
-        Todas
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="DHL">
-        DHL - Gabrielly
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="Pannan">
-        Pannan - Gabrielly
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="Garcia">
-        Garcia - Juliana
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="Excargo">
-        Excargo - Juliana
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="Transbritto">
-        Transbritto - Larissa
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="PDA">
-        PDA - Larissa
-      </button>
-      <button class="sidebar-btn transportadora-btn" data-transportadora="GLM">
-        GLM - Larissa
-      </button>
-    </div>
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
 
-    <div class="sidebar-section">
-      <h2>Filtro por vencimento</h2>
+/* SIDEBAR */
+.sidebar {
+  background: #020617;
+  border-right: 1px solid #1f2937;
+  padding: 24px 20px;
+}
 
-      <div class="date-range-sidebar">
-        <div class="date-field">
-          <label for="filtroVencimentoDe">De</label>
-          <input type="date" id="filtroVencimentoDe" />
-        </div>
-        <div class="date-field">
-          <label for="filtroVencimentoAte">Até</label>
-          <input type="date" id="filtroVencimentoAte" />
-        </div>
-      </div>
+.logo {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 18px;
+}
 
-      <button id="btnLimparFiltros" class="sidebar-btn">
-        Limpar filtros
-      </button>
-    </div>
-  </aside>
+.sidebar-section {
+  margin-top: 22px;
+}
 
-  <!-- CONTEÚDO PRINCIPAL -->
-  <main class="main">
-    <!-- ABAS -->
-    <div class="tabs">
-      <button id="tabDashboard" class="tab active">Dashboard</button>
-      <button id="tabCadastro" class="tab">Cadastro</button>
-      <button id="tabFaturas" class="tab">Faturas</button>
-    </div>
+.sidebar-section h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-bottom: 10px;
+}
 
-    <!-- DASHBOARD -->
-    <section id="dashboardSection" class="section visible">
-      <div class="dash-header">
-        <h2>Resumo geral</h2>
+.transportadora-btn {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid #1f2937;
+  background: transparent;
+  color: #e5e7eb;
+  padding: 10px 12px;
+  text-align: left;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
 
-        <!-- ✅ NOVO: botões Pendente / Pago -->
-        <div class="dashboard-modo">
-          <button id="btnDashboardPendente" type="button" class="chip active">Pendente</button>
-          <button id="btnDashboardPago" type="button" class="chip">Pago</button>
-        </div>
-      </div>
+.transportadora-btn.selected {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
+}
 
-      <div class="cards">
-        <div class="card">
-          <h3>Total Geral</h3>
-          <p id="cardTotalGeral">R$ 0,00</p>
-        </div>
-        <div class="card">
-          <h3>Total em Dia</h3>
-          <p id="cardEmDia">R$ 0,00</p>
-        </div>
-        <div class="card">
-          <h3>Total Atrasado</h3>
-          <p id="cardAtrasado">R$ 0,00</p>
-        </div>
+.field-label {
+  display: block;
+  font-size: 12px;
+  color: #9ca3af;
+  margin: 10px 0 6px;
+}
 
-        <!-- ✅ NOVO: só aparece no modo PAGO -->
-        <div class="card" id="cardPagoBox" style="display:none;">
-          <h3>Total Pago</h3>
-          <p id="cardPago">R$ 0,00</p>
-        </div>
-      </div>
+.input {
+  width: 100%;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  color: #e5e7eb;
+  padding: 10px 12px;
+  border-radius: 10px;
+  outline: none;
+}
 
-      <!-- RESUMO POR TRANSPORTADORA / BACKLOG -->
-      <section class="table-section dashboard-table">
-        <h2>Resumo por transportadora</h2>
-        <table class="tabela">
-          <thead id="theadResumoDashboard"></thead>
-          <tbody id="tbodyResumoDashboard"></tbody>
-        </table>
-        <p class="backlog-label">Backlog</p>
-      </section>
-    </section>
+.btn-primary {
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 0;
+  background: #16a34a;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
 
-    <!-- CADASTRO -->
-    <section id="cadastroSection" class="section">
-      <h2>Cadastro de Fatura</h2>
+.btn-secondary {
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #1f2937;
+  background: #0b1220;
+  color: #e5e7eb;
+  cursor: pointer;
+}
 
-      <form id="formFatura" class="form-grid">
-        <div class="form-group">
-          <label>Transportadora</label>
-          <input type="text" id="inputTransportadora" required />
-        </div>
-        <div class="form-group">
-          <label>Nº Fatura</label>
-          <input type="text" id="inputNumeroFatura" required />
-        </div>
-        <div class="form-group">
-          <label>Valor (R$)</label>
-          <input type="number" step="0.01" id="inputValor" required />
-        </div>
-        <div class="form-group">
-          <label>Data vencimento</label>
-          <input type="date" id="inputVencimento" required />
-        </div>
-        <div class="form-group">
-          <label>Status</label>
-          <select id="inputStatus">
-            <option value="pendente">Pendente</option>
-            <option value="pago">Pago</option>
-            <option value="atrasado">Atrasado</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Observação</label>
-          <input type="text" id="inputObservacao" />
-        </div>
-        <div class="form-group">
-          <label>Anexos (opcional)</label>
-          <input type="file" id="inputAnexos" multiple />
-        </div>
+/* CONTENT */
+.content {
+  padding: 22px 26px;
+}
 
-        <div class="form-actions">
-          <button type="submit" class="primary">Salvar fatura</button>
-        </div>
-      </form>
-    </section>
+/* TOPBAR */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
 
-    <!-- FATURAS -->
-    <section id="faturasSection" class="section">
-      <header class="filtros-header">
-        <div class="field-group">
-          <label for="buscaNumero">Buscar nº de fatura:</label>
-          <input type="text" id="buscaNumero" placeholder="Ex: 12345" />
-        </div>
+.tabs {
+  display: flex;
+  gap: 14px;
+}
 
-        <div class="field-group">
-          <label>Período (vencimento):</label>
+.tab {
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 999px;
+}
 
-          <div class="date-range-line">
-            <div class="date-range">
-              <input type="date" id="filtroDataInicioFaturas" />
-              <span>a</span>
-              <input type="date" id="filtroDataFimFaturas" />
-            </div>
+.tab.active {
+  background: #16a34a;
+  color: #fff;
+  font-weight: 700;
+}
 
-            <button id="btnLimparPeriodoFaturas" type="button" class="btn-warn">
-              Limpar filtro
-            </button>
-          </div>
-        </div>
+/* SECTIONS */
+.section {
+  display: none;
+}
 
-        <div class="field-group">
-          <label for="filtroStatus">Status:</label>
-          <select id="filtroStatus">
-            <option value="">Todos</option>
-            <option value="pendente">Pendente</option>
-            <option value="pago">Pago</option>
-            <option value="atrasado">Atrasado</option>
-          </select>
-        </div>
+.section.visible {
+  display: block;
+}
 
-        <div class="filtros-actions">
-          <button id="btnAtualizarFaturas" class="primary">
-            Atualizar lista
-          </button>
-          <button id="btnExportarExcel" type="button" class="secondary">
-            Exportar Excel
-          </button>
-        </div>
-      </header>
+.section-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 10px 0 14px;
+}
 
-      <section class="cards cards-small">
-        <div class="card mini">
-          <h3>Total</h3>
-          <p id="fatTotal">R$ 0,00</p>
-        </div>
-        <div class="card mini">
-          <h3>Pendentes</h3>
-          <p id="fatPendentes">R$ 0,00</p>
-        </div>
-        <div class="card mini">
-          <h3>Atrasadas</h3>
-          <p id="fatAtrasadas">R$ 0,00</p>
-        </div>
-        <div class="card mini">
-          <h3>Pagas</h3>
-          <p id="fatPagas">R$ 0,00</p>
-        </div>
-      </section>
+.sub-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 18px 0 10px;
+  color: #d1d5db;
+}
 
-      <section class="table-section">
-        <h2>Faturas</h2>
-        <table class="tabela">
-          <thead>
-          <tr>
-            <th>ID</th>
-            <th>Transportadora</th>
-            <th>Responsável</th>
-            <th>Nº Fatura</th>
-            <th>Valor</th>
-            <th>Vencimento</th>
-            <th>Status</th>
-            <th>Observação</th>
-            <th>Ações</th>
-          </tr>
-          </thead>
-          <tbody id="tbodyFaturas"></tbody>
-        </table>
-      </section>
-    </section>
-  </main>
-</div>
+/* ✅ Header do dashboard com toggle ao lado do título */
+.dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
 
-<!-- MODAL ANEXOS -->
-<div id="modalAnexos" class="modal">
-  <div class="modal-content">
-    <button id="modalFechar" class="modal-close">&times;</button>
-    <h2>Anexos da fatura <span id="modalFaturaId"></span></h2>
-    <ul id="listaAnexos"></ul>
-  </div>
-</div>
+.dash-toggle {
+  display: flex;
+  gap: 10px;
+}
 
-<script src="/static/app.js"></script>
-</body>
-</html>
+.pill-btn {
+  border: 1px solid #f59e0b;
+  background: transparent;
+  color: #fbbf24;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.pill-btn.active {
+  background: rgba(245, 158, 11, 0.15);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16);
+}
+
+/* CARDS */
+.cards {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  gap: 14px;
+  margin: 12px 0 6px;
+}
+
+.cards-small {
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 14px;
+}
+
+.card {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(11, 18, 32, 0.92));
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.card-label {
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.card-value {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 900;
+  color: #fff;
+}
+
+/* TABLE */
+.table-wrap {
+  background: rgba(2, 6, 23, 0.35);
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.table th,
+.table td {
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(31, 41, 55, 0.6);
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.table th {
+  color: #cbd5e1;
+  font-weight: 800;
+  position: sticky;
+  top: 0;
+  background: rgba(2, 6, 23, 0.9);
+  z-index: 1;
+}
+
+.spacer-row td {
+  border-bottom: 0;
+  height: 18px;
+}
+
+/* Faturas toolbar */
+.faturas-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0 14px;
+}
+
+.faturas-toolbar .input {
+  flex: 1;
+}
+
+.faturas-toolbar .btn-secondary {
+  width: auto;
+  margin: 0;
+}
+
+.filtros-faturas {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.filtros-actions .btn-secondary {
+  width: auto;
+  margin: 0;
+}
+
+/* Ações */
+.acoes {
+  position: relative;
+}
+
+.menu-btn {
+  border: 1px solid #1f2937;
+  background: #0b1220;
+  color: #e5e7eb;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.menu-dropdown {
+  display: none;
+  min-width: 170px;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  z-index: 9999;
+}
+
+.menu-dropdown.ativo {
+  display: block;
+}
+
+.menu-dropdown button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #e5e7eb;
+  padding: 10px 10px;
+  text-align: left;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.menu-dropdown button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 10000;
+}
+
+.modal.open {
+  display: flex;
+}
+
+.modal-content {
+  width: min(720px, 96vw);
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-close {
+  border: 1px solid #1f2937;
+  background: transparent;
+  color: #e5e7eb;
+  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+}
+
+.lista-anexos {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+  list-style: none;
+}
+
+.lista-anexos li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+}
+
+.lista-anexos a {
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.btn-excluir-anexo {
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.backlog-label {
+  margin-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #94a3b8;
+}
