@@ -5,6 +5,8 @@ const API_BASE = "";
 
 // Filtros globais (sidebar + busca)
 let filtroTransportadora = "";
+let filtroVencimentoDe = "";
+let filtroVencimentoAte = "";
 let filtroNumeroFatura = "";
 
 // Filtros só da aba Faturas
@@ -12,11 +14,11 @@ let filtroDataInicioFaturas = "";
 let filtroDataFimFaturas = "";
 let filtroStatus = "";
 
+// ✅ NOVO: modo do dashboard (pendente/pago)
+let dashboardModo = "pendente";
+
 // Cache da última lista vinda da API
 let ultimaListaFaturas = [];
-
-// ✅ modo do dashboard
-let dashboardModo = "pendente"; // "pendente" | "pago"
 
 // ============ HELPERS ============
 
@@ -55,34 +57,14 @@ function formatDate(isoDate) {
   return d.toLocaleDateString("pt-BR");
 }
 
-// pega próxima quarta (JS) – dom=0 seg=1 ter=2 qua=3
-function getProxQuartaTime() {
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-
-  const weekday = hoje.getDay();
-  let diasAteQuarta = (3 - weekday + 7) % 7;
-  if (diasAteQuarta === 0) diasAteQuarta = 7;
-
-  const proxQuarta = new Date(hoje);
-  proxQuarta.setDate(hoje.getDate() + diasAteQuarta);
-  proxQuarta.setHours(0, 0, 0, 0);
-  return proxQuarta.getTime();
-}
-
 // ============ DASHBOARD ============
 
 async function carregarDashboard() {
   try {
     const params = new URLSearchParams();
-
     if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
-
-    // ✅ usa DE/ATÉ da sidebar
-    const de = document.getElementById("filtroVencimentoDe")?.value || "";
-    const ate = document.getElementById("filtroVencimentoAte")?.value || "";
-    if (de) params.append("de_vencimento", de);
-    if (ate) params.append("ate_vencimento", ate);
+    if (filtroVencimentoDe) params.append("de_vencimento", filtroVencimentoDe);
+    if (filtroVencimentoAte) params.append("ate_vencimento", filtroVencimentoAte);
 
     // 1) Resumo geral (cards) via API
     const urlResumo =
@@ -92,15 +74,34 @@ async function carregarDashboard() {
 
     const respResumo = await fetch(urlResumo);
     if (!respResumo.ok) throw new Error("Erro ao buscar resumo");
+
     const dataResumo = await respResumo.json();
 
-    // ✅ ajustado para seu retorno do main.py
-    document.getElementById("cardTotal").textContent = formatCurrency(dataResumo.total_geral);
-    document.getElementById("cardPendentes").textContent = formatCurrency(dataResumo.total_em_dia);
-    document.getElementById("cardAtrasadas").textContent = formatCurrency(dataResumo.total_atrasado);
-    document.getElementById("cardEmDia").textContent = formatCurrency(dataResumo.total_pago);
+    // ✅ ids novos do HTML
+    const elTotalGeral = document.getElementById("cardTotalGeral");
+    const elEmDia = document.getElementById("cardEmDia");
+    const elAtrasado = document.getElementById("cardAtrasado");
+    const elPago = document.getElementById("cardPago");
+    const boxPago = document.getElementById("cardPagoBox");
 
-    // 2) Tabela do dashboard usando a lista de faturas
+    if (dashboardModo === "pendente") {
+      if (boxPago) boxPago.style.display = "none";
+
+      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_geral);
+      if (elEmDia) elEmDia.textContent = formatCurrency(dataResumo.total_em_dia);
+      if (elAtrasado) elAtrasado.textContent = formatCurrency(dataResumo.total_atrasado);
+      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago);
+    } else {
+      // ✅ modo PAGO: mostra o card pago e "foca" nele
+      if (boxPago) boxPago.style.display = "block";
+
+      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_pago);
+      if (elEmDia) elEmDia.textContent = formatCurrency(0);
+      if (elAtrasado) elAtrasado.textContent = formatCurrency(0);
+      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago);
+    }
+
+    // 2) Tabela "Resumo por transportadora" usando a lista de faturas
     let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
     if (lista.length === 0) {
@@ -114,155 +115,134 @@ async function carregarDashboard() {
       lista = await respFat.json();
     }
 
-    renderResumoDashboard(lista);
+    // ✅ render diferente conforme modo
+    if (dashboardModo === "pago") {
+      renderResumoDashboardPago(lista);
+    } else {
+      renderResumoDashboardPendente(lista);
+    }
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar dashboard");
   }
 }
 
-// monta tabela horizontal tipo backlog (Pendente ou Pago)
-function renderResumoDashboard(lista) {
+// ======== DASHBOARD: PENDENTE (igual seu backlog, mas com RESPONSÁVEL + espaços) ========
+
+function renderResumoDashboardPendente(lista) {
   const thead = document.getElementById("theadResumoDashboard");
   const tbody = document.getElementById("tbodyResumoDashboard");
-  const titulo = document.getElementById("tituloTabelaDashboard");
   if (!thead || !tbody) return;
 
-  if (titulo) {
-    titulo.textContent =
-      dashboardModo === "pago"
-        ? "Pagas por transportadora"
-        : "Resumo por transportadora";
-  }
+  // Hoje zerado
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
 
-  const proxQuartaTime = getProxQuartaTime();
+  // Próxima quarta-feira (dom=0, seg=1, ter=2, qua=3)
+  const weekday = hoje.getDay();
+  let diasAteQuarta = (3 - weekday + 7) % 7;
+  if (diasAteQuarta === 0) diasAteQuarta = 7;
 
-  // ===== datas do cabeçalho conforme modo =====
+  const proxQuarta = new Date(hoje);
+  proxQuarta.setDate(hoje.getDate() + diasAteQuarta);
+  proxQuarta.setHours(0, 0, 0, 0);
+  const proxQuartaTime = proxQuarta.getTime();
+
+  // considerar datas de faturas EM ABERTO (pendente/atrasado)
   const datasSet = new Set();
   lista.forEach((f) => {
     const statusLower = (f.status || "").toLowerCase();
-
-    const ok =
-      dashboardModo === "pago"
-        ? statusLower === "pago"
-        : statusLower !== "pago";
-
-    if (ok && f.data_vencimento) datasSet.add(f.data_vencimento);
+    if (statusLower !== "pago" && f.data_vencimento) datasSet.add(f.data_vencimento);
   });
 
   const datas = Array.from(datasSet).sort();
 
-  // ===== Cabeçalho dinâmico =====
-  let headerHtml = `<tr><th>Transportadora</th>`;
-
-  if (dashboardModo === "pago") {
-    headerHtml += `<th>Total pago</th>`;
-  } else {
-    headerHtml += `<th>Total atrasado</th><th>Total em dia</th><th>Total geral</th>`;
-  }
-
+  // Cabeçalho (✅ inclui Responsável)
+  let headerHtml = `
+    <tr>
+      <th>Responsável</th>
+      <th>Transportadora</th>
+      <th>Total atrasado</th>
+      <th>Total em dia</th>
+      <th>Total geral</th>
+  `;
   datas.forEach((d) => {
     headerHtml += `<th>${formatDate(d)}</th>`;
   });
-
-  headerHtml += `</tr>`;
+  headerHtml += "</tr>";
   thead.innerHTML = headerHtml;
 
-  // ===== Agrupar por transportadora =====
+  // Agrupar por transportadora
   const grupos = {};
+  lista.forEach((f) => {
+    const transp = f.transportadora || "Sem nome";
+    const resp = f.responsavel || "";
 
-  function ensure(transp) {
     if (!grupos[transp]) {
       grupos[transp] = {
+        responsavel: resp,
         totalAtrasado: 0,
         totalEmDia: 0,
         totalGeral: 0,
-        totalPago: 0,
         porData: {},
       };
     }
-  }
-
-  lista.forEach((f) => {
-    const transp = f.transportadora || "Sem nome";
-    ensure(transp);
+    if (!grupos[transp].responsavel && resp) grupos[transp].responsavel = resp;
 
     const valor = Number(f.valor || 0);
     const statusLower = (f.status || "").toLowerCase();
-    const ok =
-      dashboardModo === "pago"
-        ? statusLower === "pago"
-        : statusLower !== "pago";
 
-    if (!ok) return;
+    // Só conta no dashboard se não estiver pago
+    if (statusLower === "pago") return;
 
-    const key = f.data_vencimento;
-    grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
-
-    if (dashboardModo === "pago") {
-      grupos[transp].totalPago += valor;
-      return;
-    }
-
-    // pendente mode
     grupos[transp].totalGeral += valor;
 
     const d = parseISODateLocal(f.data_vencimento);
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
-    if (statusLower === "atrasado") {
-      grupos[transp].totalAtrasado += valor;
-    } else if (statusLower === "pendente") {
-      if (vencTime !== null && vencTime < proxQuartaTime) grupos[transp].totalAtrasado += valor;
-      else grupos[transp].totalEmDia += valor; // ✅ >= próxima quarta entra em dia
+    if (vencTime !== null) {
+      if (statusLower === "atrasado") {
+        grupos[transp].totalAtrasado += valor;
+      } else if (statusLower === "pendente") {
+        // regra do teu layout: antes da próxima quarta = atrasado, a partir da próxima quarta = em dia
+        if (vencTime < proxQuartaTime) grupos[transp].totalAtrasado += valor;
+        else grupos[transp].totalEmDia += valor;
+      }
     }
+
+    const key = f.data_vencimento;
+    grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
   });
 
-  // ===== Render =====
   tbody.innerHTML = "";
 
-  const ordemPreferida = ["DHL", "Pannan", "Transbritto", "PDA", "GLM", "Garcia", "Excargo"];
-  const chaves = Object.keys(grupos);
-
-  chaves.sort((a, b) => {
-    const ia = ordemPreferida.indexOf(a);
-    const ib = ordemPreferida.indexOf(b);
-    if (ia === -1 && ib === -1) return a.localeCompare(b);
-    if (ia === -1) return 1;
-    if (ib === -1) return -1;
-    return ia - ib;
-  });
-
-  // totais gerais
-  let totAtrasado = 0, totEmDia = 0, totGeral = 0, totPago = 0;
+  let totalGeralAtrasado = 0;
+  let totalGeralEmDia = 0;
+  let totalGeral = 0;
   const totaisPorData = {};
 
-  chaves.forEach((transp) => {
+  const ordem = Object.keys(grupos); // mantém ordem do que vier
+
+  ordem.forEach((transp) => {
     const g = grupos[transp];
+    const tr = document.createElement("tr");
+
+    totalGeralAtrasado += g.totalAtrasado;
+    totalGeralEmDia += g.totalEmDia;
+    totalGeral += g.totalGeral;
 
     datas.forEach((d) => {
       const v = g.porData[d] || 0;
       totaisPorData[d] = (totaisPorData[d] || 0) + v;
     });
 
-    const tr = document.createElement("tr");
-    let html = `<td>${transp}</td>`;
-
-    if (dashboardModo === "pago") {
-      totPago += g.totalPago;
-      html += `<td>${formatCurrency(g.totalPago)}</td>`;
-    } else {
-      totAtrasado += g.totalAtrasado;
-      totEmDia += g.totalEmDia;
-      totGeral += g.totalGeral;
-
-      html += `
-        <td>${formatCurrency(g.totalAtrasado)}</td>
-        <td>${formatCurrency(g.totalEmDia)}</td>
-        <td>${formatCurrency(g.totalGeral)}</td>
-      `;
-    }
-
+    let html = `
+      <td>${g.responsavel || "-"}</td>
+      <td>${transp}</td>
+      <td>${formatCurrency(g.totalAtrasado)}</td>
+      <td>${formatCurrency(g.totalEmDia)}</td>
+      <td>${formatCurrency(g.totalGeral)}</td>
+    `;
     datas.forEach((d) => {
       const val = g.porData[d] || 0;
       html += `<td>${val ? formatCurrency(val) : "-"}</td>`;
@@ -271,42 +251,127 @@ function renderResumoDashboard(lista) {
     tr.innerHTML = html;
     tbody.appendChild(tr);
 
-    // ✅ espaço depois da Pannan e GLM
+    // ✅ espaços após Pannan e após GLM
     if (transp === "Pannan" || transp === "GLM") {
       const spacer = document.createElement("tr");
       spacer.className = "spacer-row";
-      const td = document.createElement("td");
-      td.colSpan = (dashboardModo === "pago" ? (2 + datas.length) : (4 + datas.length));
-      td.innerHTML = "&nbsp;";
-      spacer.appendChild(td);
+      spacer.innerHTML = `<td colspan="${5 + datas.length}">&nbsp;</td>`;
       tbody.appendChild(spacer);
     }
   });
 
   // linha total
-  if (chaves.length > 0) {
+  if (Object.keys(grupos).length > 0) {
     const trTotal = document.createElement("tr");
-
-    let html = `<td><strong>Total geral</strong></td>`;
-
-    if (dashboardModo === "pago") {
-      html += `<td><strong>${formatCurrency(totPago)}</strong></td>`;
-    } else {
-      html += `
-        <td><strong>${formatCurrency(totAtrasado)}</strong></td>
-        <td><strong>${formatCurrency(totEmDia)}</strong></td>
-        <td><strong>${formatCurrency(totGeral)}</strong></td>
-      `;
-    }
-
+    let html = `
+      <td><strong>-</strong></td>
+      <td><strong>Total geral</strong></td>
+      <td><strong>${formatCurrency(totalGeralAtrasado)}</strong></td>
+      <td><strong>${formatCurrency(totalGeralEmDia)}</strong></td>
+      <td><strong>${formatCurrency(totalGeral)}</strong></td>
+    `;
     datas.forEach((d) => {
       const v = totaisPorData[d] || 0;
       html += `<td><strong>${v ? formatCurrency(v) : "-"}</strong></td>`;
     });
-
     trTotal.innerHTML = html;
     tbody.appendChild(trTotal);
   }
+}
+
+// ======== DASHBOARD: PAGO (tabela por data, somando pagos por vencimento) ========
+
+function renderResumoDashboardPago(lista) {
+  const thead = document.getElementById("theadResumoDashboard");
+  const tbody = document.getElementById("tbodyResumoDashboard");
+  if (!thead || !tbody) return;
+
+  // só pagos
+  const pagos = (lista || []).filter((f) => (f.status || "").toLowerCase() === "pago");
+
+  // datas (usando data_vencimento como "data" do agrupamento)
+  const datasSet = new Set();
+  pagos.forEach((f) => {
+    if (f.data_vencimento) datasSet.add(f.data_vencimento);
+  });
+  const datas = Array.from(datasSet).sort();
+
+  let headerHtml = `
+    <tr>
+      <th>Responsável</th>
+      <th>Transportadora</th>
+      <th>Total pago</th>
+  `;
+  datas.forEach((d) => (headerHtml += `<th>${formatDate(d)}</th>`));
+  headerHtml += `</tr>`;
+  thead.innerHTML = headerHtml;
+
+  const grupos = {};
+  pagos.forEach((f) => {
+    const transp = f.transportadora || "Sem nome";
+    const resp = f.responsavel || "";
+    if (!grupos[transp]) {
+      grupos[transp] = { responsavel: resp, totalPago: 0, porData: {} };
+    }
+    if (!grupos[transp].responsavel && resp) grupos[transp].responsavel = resp;
+
+    const valor = Number(f.valor || 0);
+    grupos[transp].totalPago += valor;
+
+    const key = f.data_vencimento;
+    grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
+  });
+
+  tbody.innerHTML = "";
+
+  const totaisPorData = {};
+  let totalGeralPago = 0;
+
+  Object.keys(grupos).forEach((transp) => {
+    const g = grupos[transp];
+    totalGeralPago += g.totalPago;
+
+    datas.forEach((d) => {
+      const v = g.porData[d] || 0;
+      totaisPorData[d] = (totaisPorData[d] || 0) + v;
+    });
+
+    const tr = document.createElement("tr");
+    let html = `
+      <td>${g.responsavel || "-"}</td>
+      <td>${transp}</td>
+      <td>${formatCurrency(g.totalPago)}</td>
+    `;
+    datas.forEach((d) => {
+      const val = g.porData[d] || 0;
+      html += `<td>${val ? formatCurrency(val) : "-"}</td>`;
+    });
+
+    tr.innerHTML = html;
+    tbody.appendChild(tr);
+
+    // ✅ espaços após Pannan e após GLM
+    if (transp === "Pannan" || transp === "GLM") {
+      const spacer = document.createElement("tr");
+      spacer.className = "spacer-row";
+      spacer.innerHTML = `<td colspan="${3 + datas.length}">&nbsp;</td>`;
+      tbody.appendChild(spacer);
+    }
+  });
+
+  // total
+  const trTotal = document.createElement("tr");
+  let html = `
+    <td><strong>-</strong></td>
+    <td><strong>Total pago</strong></td>
+    <td><strong>${formatCurrency(totalGeralPago)}</strong></td>
+  `;
+  datas.forEach((d) => {
+    const v = totaisPorData[d] || 0;
+    html += `<td><strong>${v ? formatCurrency(v) : "-"}</strong></td>`;
+  });
+  trTotal.innerHTML = html;
+  tbody.appendChild(trTotal);
 }
 
 // ============ FATURAS (LISTA + RESUMO) ============
@@ -314,15 +379,10 @@ function renderResumoDashboard(lista) {
 async function carregarFaturas() {
   try {
     const params = new URLSearchParams();
-
     if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+    if (filtroVencimentoDe) params.append("de_vencimento", filtroVencimentoDe);
+    if (filtroVencimentoAte) params.append("ate_vencimento", filtroVencimentoAte);
     if (filtroNumeroFatura) params.append("numero_fatura", filtroNumeroFatura);
-
-    // ✅ usa DE/ATÉ da sidebar também no /faturas
-    const de = document.getElementById("filtroVencimentoDe")?.value || "";
-    const ate = document.getElementById("filtroVencimentoAte")?.value || "";
-    if (de) params.append("de_vencimento", de);
-    if (ate) params.append("ate_vencimento", ate);
 
     const url =
       params.toString().length > 0
@@ -420,6 +480,7 @@ function renderizarFaturas() {
   if (elAtr) elAtr.textContent = formatCurrency(atrasadas);
   if (elPag) elPag.textContent = formatCurrency(pagas);
 
+  // TABELA
   if (lista.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
@@ -590,7 +651,6 @@ function preencherFormularioEdicao(f) {
   document.getElementById("formFatura").dataset.editId = f.id;
 }
 
-// >>>>> MODAL ANEXOS (COM EXCLUIR) <<<<<
 async function abrirModalAnexos(faturaId) {
   document.getElementById("modalFaturaId").textContent = faturaId;
   const lista = document.getElementById("listaAnexos");
@@ -630,7 +690,6 @@ async function abrirModalAnexos(faturaId) {
               method: "DELETE",
             });
             if (!respDel.ok) throw new Error("Erro ao excluir anexo");
-
             abrirModalAnexos(faturaId);
           } catch (err) {
             console.error(err);
@@ -692,9 +751,7 @@ async function salvarFatura(e) {
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos && inputAnexos.files && inputAnexos.files.length > 0) {
       const fd = new FormData();
-      for (const file of inputAnexos.files) {
-        fd.append("files", file);
-      }
+      for (const file of inputAnexos.files) fd.append("files", file);
 
       const respAnexos = await fetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
         method: "POST",
@@ -711,9 +768,7 @@ async function salvarFatura(e) {
           } else {
             detalhe = await respAnexos.text();
           }
-        } catch (_) {
-          detalhe = "";
-        }
+        } catch (_) {}
 
         console.error("Erro ao enviar anexos:", respAnexos.status, detalhe);
         alert(
@@ -780,33 +835,36 @@ function exportarExcel() {
 document.addEventListener("DOMContentLoaded", () => {
   setupMenuDelegation();
 
+  // Abas
   document.getElementById("tabDashboard").addEventListener("click", () => ativarAba("dashboard"));
   document.getElementById("tabCadastro").addEventListener("click", () => ativarAba("cadastro"));
   document.getElementById("tabFaturas").addEventListener("click", () => ativarAba("faturas"));
 
-  // ✅ botões do dashboard
-  const btnDashPendente = document.getElementById("btnDashPendente");
-  const btnDashPago = document.getElementById("btnDashPago");
+  // ✅ botões do dashboard (pendente/pago)
+  const btnPend = document.getElementById("btnDashboardPendente");
+  const btnPago = document.getElementById("btnDashboardPago");
 
-  if (btnDashPendente && btnDashPago) {
-    btnDashPendente.addEventListener("click", () => {
+  if (btnPend && btnPago) {
+    btnPend.addEventListener("click", () => {
       dashboardModo = "pendente";
-      btnDashPendente.classList.add("active");
-      btnDashPago.classList.remove("active");
-      renderResumoDashboard(ultimaListaFaturas || []);
+      btnPend.classList.add("active");
+      btnPago.classList.remove("active");
+      carregarDashboard();
     });
 
-    btnDashPago.addEventListener("click", () => {
+    btnPago.addEventListener("click", () => {
       dashboardModo = "pago";
-      btnDashPago.classList.add("active");
-      btnDashPendente.classList.remove("active");
-      renderResumoDashboard(ultimaListaFaturas || []);
+      btnPago.classList.add("active");
+      btnPend.classList.remove("active");
+      carregarDashboard();
     });
   }
 
   // Botão página inicial
   document.getElementById("btnHome").addEventListener("click", () => {
     filtroTransportadora = "";
+    filtroVencimentoDe = "";
+    filtroVencimentoAte = "";
     filtroNumeroFatura = "";
     filtroDataInicioFaturas = "";
     filtroDataFimFaturas = "";
@@ -830,6 +888,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
 
+    dashboardModo = "pendente";
+    if (btnPend && btnPago) {
+      btnPend.classList.add("active");
+      btnPago.classList.remove("active");
+    }
+
     ativarAba("dashboard");
     carregarFaturas();
   });
@@ -844,24 +908,36 @@ document.addEventListener("DOMContentLoaded", () => {
     })
   );
 
-  // ✅ filtro vencimento sidebar (DE/ATÉ)
-  const filtroDe = document.getElementById("filtroVencimentoDe");
-  const filtroAte = document.getElementById("filtroVencimentoAte");
+  // ✅ filtro vencimento sidebar (De / Até)
+  const inputDe = document.getElementById("filtroVencimentoDe");
+  const inputAte = document.getElementById("filtroVencimentoAte");
 
-  if (filtroDe) filtroDe.addEventListener("change", carregarFaturas);
-  if (filtroAte) filtroAte.addEventListener("change", carregarFaturas);
+  if (inputDe) {
+    inputDe.addEventListener("change", (e) => {
+      filtroVencimentoDe = e.target.value;
+      carregarFaturas();
+    });
+  }
+  if (inputAte) {
+    inputAte.addEventListener("change", (e) => {
+      filtroVencimentoAte = e.target.value;
+      carregarFaturas();
+    });
+  }
 
   // Limpar filtros (sidebar)
   const btnLimparFiltros = document.getElementById("btnLimparFiltros");
   if (btnLimparFiltros) {
     btnLimparFiltros.addEventListener("click", () => {
+      filtroVencimentoDe = "";
+      filtroVencimentoAte = "";
       filtroNumeroFatura = "";
       filtroDataInicioFaturas = "";
       filtroDataFimFaturas = "";
       filtroStatus = "";
 
-      if (filtroDe) filtroDe.value = "";
-      if (filtroAte) filtroAte.value = "";
+      if (inputDe) inputDe.value = "";
+      if (inputAte) inputAte.value = "";
 
       const buscaNumero = document.getElementById("buscaNumero");
       if (buscaNumero) buscaNumero.value = "";
@@ -894,7 +970,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Busca nº fatura (pesquisa)
+  // Busca nº fatura
   const buscaNumero = document.getElementById("buscaNumero");
   if (buscaNumero) {
     buscaNumero.addEventListener("input", (e) => {
@@ -954,5 +1030,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Primeira carga
   carregarFaturas();
 });
