@@ -46,7 +46,7 @@
         <div class="sidebar-section">
             <h2>Filtro por vencimento</h2>
 
-            <!-- DE / ATÉ (Dashboard) -->
+            <!-- NOVO: DE / ATÉ (Dashboard) -->
             <div class="date-range-sidebar">
                 <div class="date-field">
                     <label for="filtroVencimentoDe">De</label>
@@ -160,10 +160,19 @@
 
                 <div class="field-group">
                     <label>Período (vencimento):</label>
-                    <div class="date-range">
-                        <input type="date" id="filtroDataInicioFaturas" />
-                        <span>a</span>
-                        <input type="date" id="filtroDataFimFaturas" />
+
+                    <!-- linha com datas + botão -->
+                    <div class="date-range-line">
+                        <div class="date-range">
+                            <input type="date" id="filtroDataInicioFaturas" />
+                            <span>a</span>
+                            <input type="date" id="filtroDataFimFaturas" />
+                        </div>
+
+                        <!-- NOVO: botão ao lado (amarelo) -->
+                        <button id="btnLimparPeriodoFaturas" type="button" class="btn-warn">
+                            Limpar filtro
+                        </button>
                     </div>
                 </div>
 
