@@ -256,6 +256,7 @@ def listar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
     ate_vencimento: Optional[str] = Query(None),
+    de_vencimento: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
     query = db.query(FaturaDB)
@@ -263,10 +264,18 @@ def listar_faturas(
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
+    # Filtro por vencimento (DE / ATÉ)
+    if de_vencimento:
+        try:
+            data_de = datetime.strptime(de_vencimento, "%Y-%m-%d").date()
+            query = query.filter(FaturaDB.data_vencimento >= data_de)
+        except ValueError:
+            pass
+
     if ate_vencimento:
         try:
-            filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
-            query = query.filter(FaturaDB.data_vencimento <= filtro_data)
+            data_ate = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            query = query.filter(FaturaDB.data_vencimento <= data_ate)
         except ValueError:
             pass
 
@@ -426,6 +435,7 @@ def resumo_dashboard(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
     ate_vencimento: Optional[str] = Query(None),
+    de_vencimento: Optional[str] = Query(None),
 ):
     """
     Regra ajustada para bater com o Dashboard (tabela):
@@ -455,10 +465,18 @@ def resumo_dashboard(
             FaturaDB.transportadora.ilike(f"%{transportadora}%")
         )
 
+    # Filtro por vencimento (DE / ATÉ)
+    if de_vencimento:
+        try:
+            data_de = datetime.strptime(de_vencimento, "%Y-%m-%d").date()
+            query_base = query_base.filter(FaturaDB.data_vencimento >= data_de)
+        except ValueError:
+            pass
+
     if ate_vencimento:
         try:
-            filtro_data = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
-            query_base = query_base.filter(FaturaDB.data_vencimento <= filtro_data)
+            data_ate = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            query_base = query_base.filter(FaturaDB.data_vencimento <= data_ate)
         except ValueError:
             pass
 
