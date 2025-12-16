@@ -61,12 +61,15 @@ function formatDate(isoDate) {
 
 async function carregarDashboard() {
   try {
+    // título sempre correto
+    const titulo = document.getElementById("tituloResumoDashboard");
+    if (titulo) titulo.textContent = "Resumo por transportadora";
+
     const params = new URLSearchParams();
     if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
     if (filtroVencimentoDe) params.append("de_vencimento", filtroVencimentoDe);
     if (filtroVencimentoAte) params.append("ate_vencimento", filtroVencimentoAte);
 
-    // 1) Resumo geral (cards) via API
     const urlResumo =
       params.toString().length > 0
         ? `${API_BASE}/dashboard/resumo?${params.toString()}`
@@ -77,42 +80,47 @@ async function carregarDashboard() {
 
     const dataResumo = await respResumo.json();
 
-    // ✅ containers (pra esconder/mostrar)
+    // cards (boxes)
     const boxTotalGeral = document.getElementById("cardTotalGeralBox");
     const boxEmDia = document.getElementById("cardEmDiaBox");
     const boxAtrasado = document.getElementById("cardAtrasadoBox");
     const boxPago = document.getElementById("cardPagoBox");
 
-    // ✅ valores
+    // valores
     const elTotalGeral = document.getElementById("cardTotalGeral");
     const elEmDia = document.getElementById("cardEmDia");
     const elAtrasado = document.getElementById("cardAtrasado");
     const elPago = document.getElementById("cardPago");
 
-    // ====== MODO PENDENTE ======
-    if (dashboardModo === "pendente") {
-      if (boxTotalGeral) boxTotalGeral.style.display = "block";
-      if (boxEmDia) boxEmDia.style.display = "block";
-      if (boxAtrasado) boxAtrasado.style.display = "block";
-      if (boxPago) boxPago.style.display = "none";
+    const cardsWrap = document.getElementById("cardsDashboard");
 
-      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_geral);
-      if (elEmDia) elEmDia.textContent = formatCurrency(dataResumo.total_em_dia);
-      if (elAtrasado) elAtrasado.textContent = formatCurrency(dataResumo.total_atrasado);
-      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago);
-    } else {
-      // ====== MODO PAGO: mostrar SÓ Total Pago ======
+    if (dashboardModo === "pago") {
+      // ✅ MOSTRA APENAS TOTAL PAGO
       if (boxTotalGeral) boxTotalGeral.style.display = "none";
       if (boxEmDia) boxEmDia.style.display = "none";
       if (boxAtrasado) boxAtrasado.style.display = "none";
       if (boxPago) boxPago.style.display = "block";
 
-      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago);
+      if (cardsWrap) cardsWrap.classList.add("pago-only");
+
+      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago ?? 0);
+    } else {
+      // ✅ MODO PENDENTE: mostra os 3 cards e esconde pago
+      if (boxTotalGeral) boxTotalGeral.style.display = "block";
+      if (boxEmDia) boxEmDia.style.display = "block";
+      if (boxAtrasado) boxAtrasado.style.display = "block";
+      if (boxPago) boxPago.style.display = "none";
+
+      if (cardsWrap) cardsWrap.classList.remove("pago-only");
+
+      if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_geral ?? 0);
+      if (elEmDia) elEmDia.textContent = formatCurrency(dataResumo.total_em_dia ?? 0);
+      if (elAtrasado) elAtrasado.textContent = formatCurrency(dataResumo.total_atrasado ?? 0);
+      if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago ?? 0);
     }
 
-    // 2) Tabela "Resumo por transportadora" usando a lista de faturas
+    // Tabela usando lista (cache)
     let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
-
     if (lista.length === 0) {
       const urlF =
         params.toString().length > 0
@@ -142,21 +150,15 @@ function renderResumoDashboardPendente(lista) {
   const tbody = document.getElementById("tbodyResumoDashboard");
   if (!thead || !tbody) return;
 
-  // Hoje zerado
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-
-  // ✅ Regra do frontend só para visual do GRID:
-  // vamos considerar "em aberto" por data (todas as datas de pendente/atrasado)
+  // datas pendente/atrasado
   const datasSet = new Set();
-  lista.forEach((f) => {
-    const statusLower = (f.status || "").toLowerCase();
-    if (statusLower !== "pago" && f.data_vencimento) datasSet.add(f.data_vencimento);
+  (lista || []).forEach((f) => {
+    const st = (f.status || "").toLowerCase();
+    if (st !== "pago" && f.data_vencimento) datasSet.add(f.data_vencimento);
   });
-
   const datas = Array.from(datasSet).sort();
 
-  // Cabeçalho
+  // header
   let headerHtml = `
     <tr>
       <th>Responsável</th>
@@ -169,26 +171,28 @@ function renderResumoDashboardPendente(lista) {
   headerHtml += "</tr>";
   thead.innerHTML = headerHtml;
 
-  // Para a regra "em dia" no GRID, vamos pedir a quarta de referência via API?
-  // (Mantemos simples: calculamos igual o backend)
-  const wd = hoje.getDay(); // dom=0..sab=6
-  // converter para seg=0..dom=6
-  const wdPy = (wd + 6) % 7;
-  let base = (2 - wdPy) % 7;
-  if (wdPy === 0 || wdPy === 1 || wdPy === 2) base += 7;
-  if (base === 0) base = 7;
+  // calcular corte: "quarta da próxima semana" quando hoje é segunda, senão próxima quarta normal.
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
 
-  const quartaRef = new Date(hoje);
-  quartaRef.setDate(hoje.getDate() + base);
-  quartaRef.setHours(0, 0, 0, 0);
-  const quartaRefTime = quartaRef.getTime();
+  // próxima quarta (dom=0, seg=1, ter=2, qua=3)
+  const wd = hoje.getDay();
+  let diasAteQuarta = (3 - wd + 7) % 7;
+  if (diasAteQuarta === 0) diasAteQuarta = 7;
+  let inicioEmDia = new Date(hoje);
+  inicioEmDia.setDate(hoje.getDate() + diasAteQuarta);
 
-  // Agrupar por transportadora
+  // ✅ se HOJE é SEGUNDA (1), pula mais 7 dias (vira a quarta da semana seguinte)
+  if (wd === 1) {
+    inicioEmDia.setDate(inicioEmDia.getDate() + 7);
+  }
+  inicioEmDia.setHours(0, 0, 0, 0);
+  const inicioTime = inicioEmDia.getTime();
+
   const grupos = {};
-  lista.forEach((f) => {
+  (lista || []).forEach((f) => {
     const transp = f.transportadora || "Sem nome";
     const resp = f.responsavel || "";
-
     if (!grupos[transp]) {
       grupos[transp] = {
         responsavel: resp,
@@ -201,22 +205,22 @@ function renderResumoDashboardPendente(lista) {
     if (!grupos[transp].responsavel && resp) grupos[transp].responsavel = resp;
 
     const valor = Number(f.valor || 0);
-    const statusLower = (f.status || "").toLowerCase();
+    const st = (f.status || "").toLowerCase();
 
-    if (statusLower === "pago") return;
+    if (st === "pago") return;
+
+    grupos[transp].totalGeral += valor;
 
     const d = parseISODateLocal(f.data_vencimento);
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
-    // total geral (sem pagos)
-    grupos[transp].totalGeral += valor;
-
-    // atrasado / em dia (regra nova)
-    if (statusLower === "atrasado") {
-      grupos[transp].totalAtrasado += valor;
-    } else if (statusLower === "pendente") {
-      if (vencTime !== null && vencTime < quartaRefTime) grupos[transp].totalAtrasado += valor;
-      else grupos[transp].totalEmDia += valor;
+    if (vencTime !== null) {
+      if (st === "atrasado") grupos[transp].totalAtrasado += valor;
+      else if (st === "pendente") {
+        // ✅ regra: em dia = vencimento >= inicioEmDia
+        if (vencTime < inicioTime) grupos[transp].totalAtrasado += valor;
+        else grupos[transp].totalEmDia += valor;
+      }
     }
 
     const key = f.data_vencimento;
@@ -231,10 +235,8 @@ function renderResumoDashboardPendente(lista) {
   const totaisPorData = {};
 
   const ordem = Object.keys(grupos);
-
   ordem.forEach((transp) => {
     const g = grupos[transp];
-    const tr = document.createElement("tr");
 
     totalGeralAtrasado += g.totalAtrasado;
     totalGeralEmDia += g.totalEmDia;
@@ -245,6 +247,7 @@ function renderResumoDashboardPendente(lista) {
       totaisPorData[d] = (totaisPorData[d] || 0) + v;
     });
 
+    const tr = document.createElement("tr");
     let html = `
       <td>${g.responsavel || "-"}</td>
       <td>${transp}</td>
@@ -256,11 +259,9 @@ function renderResumoDashboardPendente(lista) {
       const val = g.porData[d] || 0;
       html += `<td>${val ? formatCurrency(val) : "-"}</td>`;
     });
-
     tr.innerHTML = html;
     tbody.appendChild(tr);
 
-    // espaços após Pannan e GLM
     if (transp === "Pannan" || transp === "GLM") {
       const spacer = document.createElement("tr");
       spacer.className = "spacer-row";
@@ -269,7 +270,6 @@ function renderResumoDashboardPendente(lista) {
     }
   });
 
-  // total
   if (Object.keys(grupos).length > 0) {
     const trTotal = document.createElement("tr");
     let html = `
@@ -317,9 +317,7 @@ function renderResumoDashboardPago(lista) {
   pagos.forEach((f) => {
     const transp = f.transportadora || "Sem nome";
     const resp = f.responsavel || "";
-    if (!grupos[transp]) {
-      grupos[transp] = { responsavel: resp, totalPago: 0, porData: {} };
-    }
+    if (!grupos[transp]) grupos[transp] = { responsavel: resp, totalPago: 0, porData: {} };
     if (!grupos[transp].responsavel && resp) grupos[transp].responsavel = resp;
 
     const valor = Number(f.valor || 0);
@@ -416,6 +414,7 @@ function renderizarFaturas() {
 
   let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
+  // Filtro período (apenas aba Faturas)
   if (filtroDataInicioFaturas || filtroDataFimFaturas) {
     lista = lista.filter((f) => {
       if (!f.data_vencimento) return false;
@@ -441,12 +440,13 @@ function renderizarFaturas() {
     });
   }
 
+  // Filtro status (aba Faturas)
   if (filtroStatus) {
     const alvo = filtroStatus.toLowerCase();
     lista = lista.filter((f) => (f.status || "").toLowerCase() === alvo);
   }
 
-  // resumo da aba Faturas (mantém)
+  // RESUMO (cards da aba Faturas)
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
@@ -842,7 +842,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("tabCadastro").addEventListener("click", () => ativarAba("cadastro"));
   document.getElementById("tabFaturas").addEventListener("click", () => ativarAba("faturas"));
 
-  // botões do dashboard (pendente/pago)
+  // botões pendente/pago
   const btnPend = document.getElementById("btnDashboardPendente");
   const btnPago = document.getElementById("btnDashboardPago");
 
@@ -956,7 +956,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Limpar período (aba Faturas)
+  // Limpar filtro do período (aba Faturas)
   const btnLimparPeriodoFaturas = document.getElementById("btnLimparPeriodoFaturas");
   if (btnLimparPeriodoFaturas) {
     btnLimparPeriodoFaturas.addEventListener("click", () => {
@@ -981,7 +981,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Filtro por período (aba Faturas)
+  // Filtro por período da aba Faturas
   const ini = document.getElementById("filtroDataInicioFaturas");
   const fim = document.getElementById("filtroDataFimFaturas");
   if (ini) {
@@ -1006,7 +1006,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Atualizar lista
+  // Atualizar lista manualmente
   const btnAtualizar = document.getElementById("btnAtualizarFaturas");
   if (btnAtualizar) {
     btnAtualizar.addEventListener("click", (e) => {
