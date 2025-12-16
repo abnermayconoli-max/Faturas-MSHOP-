@@ -451,12 +451,15 @@ def resumo_dashboard(
 
     hoje = date.today()
 
-    # próxima quarta-feira (seg=0, ter=1, qua=2)
-    weekday = hoje.weekday()
+    # ✅ ALTERAÇÃO AQUI:
+    # Próxima quarta COM CORTE:
+    # se faltar 0, 1 ou 2 dias pra quarta, pula para a próxima (+7)
+    weekday = hoje.weekday()  # seg=0, ter=1, qua=2...
     dias_ate_quarta = (2 - weekday) % 7
-    if dias_ate_quarta == 0:
-        dias_ate_quarta = 7
     prox_quarta = hoje + timedelta(days=dias_ate_quarta)
+
+    if (prox_quarta - hoje).days <= 2:
+        prox_quarta = prox_quarta + timedelta(days=7)
 
     query_base = db.query(FaturaDB)
 
