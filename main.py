@@ -3,8 +3,6 @@ import os
 import uuid
 from typing import List, Optional
 
-from zoneinfo import ZoneInfo  # ✅ NOVO (fuso Brasil)
-
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -14,8 +12,8 @@ from fastapi import (
     Query,
     Request,
 )
-from fastapi.responses import FileResponse, HTMLResponse, Response
-from fastapi.responses import StreamingResponse  # <<< NOVO (para baixar do R2)
+from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -33,9 +31,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
-import boto3  # <<< NOVO (R2)
-from botocore.exceptions import ClientError  # <<< NOVO (R2)
-from botocore.config import Config  # <<< NOVO (R2)  ✅ ALTERAÇÃO
+import boto3
+from botocore.exceptions import ClientError
+from botocore.config import Config
 
 # =========================
 # CONFIG BANCO DE DADOS
@@ -50,7 +48,6 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Pasta para anexos (no disco do container) - mantida por compatibilidade
 ANEXOS_DIR = "anexos"
 os.makedirs(ANEXOS_DIR, exist_ok=True)
 
@@ -68,7 +65,6 @@ if not all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY]
         "R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
     )
 
-# ✅ ALTERAÇÃO: força S3v4 + path style (mais compatível com R2)
 s3 = boto3.client(
     "s3",
     endpoint_url=R2_ENDPOINT,
@@ -112,14 +108,13 @@ class AnexoDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    filename = Column(String)       # <<< agora guarda a KEY do R2
-    original_name = Column(String)  # nome que o usuário enviou
+    filename = Column(String)       # KEY do R2
+    original_name = Column(String)
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
     fatura = relationship("FaturaDB", back_populates="anexos")
 
-# Cria tabelas (se não existirem)
 Base.metadata.create_all(bind=engine)
 
 # =========================
@@ -135,7 +130,6 @@ class FaturaBase(BaseModel):
     observacao: Optional[str] = None
 
 class FaturaCreate(FaturaBase):
-    """Usado no POST /faturas"""
     pass
 
 class FaturaUpdate(BaseModel):
@@ -200,60 +194,6 @@ def fatura_to_out(f: FaturaDB) -> FaturaOut:
     )
 
 # =========================
-# ✅ REGRA AUTOMÁTICA (STATUS) - COM FUSO BRASIL
-# =========================
-
-BR_TZ = ZoneInfo(os.getenv("APP_TZ", "America/Sao_Paulo"))
-
-def hoje_local_br() -> date:
-    # garante que "segunda" só chega quando for segunda no Brasil
-    return datetime.now(BR_TZ).date()
-
-def _proxima_quarta(hoje: date) -> date:
-    """
-    Próxima quarta-feira a partir de 'hoje' (seg=0, ter=1, qua=2).
-    Se hoje for quarta, retorna a quarta da semana seguinte.
-    """
-    wd = hoje.weekday()
-    dias = (2 - wd) % 7
-    if dias == 0:
-        dias = 7
-    return hoje + timedelta(days=dias)
-
-def _condicao_atraso(hoje: date):
-    """
-    Sua regra:
-    - Se hoje for SEG/TER/QUA: <= próxima quarta vira atrasado
-    - Se hoje for QUI/SEX/SAB/DOM: < próxima quarta vira atrasado
-    """
-    prox_quarta = _proxima_quarta(hoje)
-    wd = hoje.weekday()  # seg=0 ... dom=6
-
-    if wd in (0, 1, 2):
-        return prox_quarta, "LE"  # <=
-    return prox_quarta, "LT"      # <
-
-def atualizar_status_automatico(db: Session):
-    """
-    Atualiza no banco:
-    pendente -> atrasado conforme regra semanal.
-    Importante: usa data do Brasil (America/Sao_Paulo).
-    """
-    hoje = hoje_local_br()
-    prox_quarta, modo = _condicao_atraso(hoje)
-
-    q = db.query(FaturaDB).filter(FaturaDB.status.ilike("pendente"))
-
-    if modo == "LE":
-        q = q.filter(FaturaDB.data_vencimento <= prox_quarta)
-    else:
-        q = q.filter(FaturaDB.data_vencimento < prox_quarta)
-
-    alteradas = q.update({FaturaDB.status: "atrasado"}, synchronize_session=False)
-    if alteradas:
-        db.commit()
-
-# =========================
 # DEPENDÊNCIA DO BANCO
 # =========================
 
@@ -270,7 +210,7 @@ def get_db():
 
 app = FastAPI(
     title="Sistema de Faturas Transportadoras",
-    version="0.7.0",
+    version="0.6.1",
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -315,15 +255,11 @@ def listar_faturas(
     de_vencimento: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
-    # ✅ aplica regra automática antes de listar
-    atualizar_status_automatico(db)
-
     query = db.query(FaturaDB)
 
     if transportadora:
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
 
-    # Filtro por vencimento (DE / ATÉ)
     if de_vencimento:
         try:
             data_de = datetime.strptime(de_vencimento, "%Y-%m-%d").date()
@@ -333,8 +269,16 @@ def listar_faturas(
 
     if ate_vencimento:
         try:
-            data_ate = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            data_ate = datetime.strptime(ate_vencimento, "%Y-%m-%d").note()
+        except Exception:
+            data_ate = None
+        if data_ate:
             query = query.filter(FaturaDB.data_vencimento <= data_ate)
+    # fallback correto:
+    if ate_vencimento:
+        try:
+            data_ate2 = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            query = query.filter(FaturaDB.data_vencimento <= data_ate2)
         except ValueError:
             pass
 
@@ -363,7 +307,6 @@ def atualizar_fatura(
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
     data = dados.dict(exclude_unset=True)
-
     for campo, valor in data.items():
         setattr(fatura, campo, valor)
 
@@ -377,7 +320,6 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    # Remove arquivos do R2 (em vez do disco)
     for anexo in fatura.anexos:
         try:
             s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
@@ -415,7 +357,6 @@ async def upload_anexos(
                 Body=content,
                 ContentType=file.content_type or "application/octet-stream",
             )
-
         except ClientError as e:
             err = getattr(e, "response", {}) or {}
             code = (((err.get("Error") or {}).get("Code")) or "")
@@ -462,9 +403,7 @@ def baixar_anexo(anexo_id: int, db: Session = Depends(get_db)):
         print("ERRO DOWNLOAD R2:", repr(e))
         raise HTTPException(status_code=404, detail="Arquivo não encontrado no R2")
 
-    headers = {
-        "Content-Disposition": f'attachment; filename="{anexo.original_name}"'
-    }
+    headers = {"Content-Disposition": f'attachment; filename="{anexo.original_name}"'}
     return StreamingResponse(body, media_type=content_type, headers=headers)
 
 @app.delete("/anexos/{anexo_id}")
@@ -486,6 +425,26 @@ def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
 # DASHBOARD / EXPORT
 # =========================
 
+def quarta_referencia(hoje: date) -> date:
+    """
+    Regra:
+    - Domingo: pega a quarta da mesma semana (em 3 dias)
+    - Seg/Ter/Qua: pula e pega a quarta da semana seguinte
+    - Qui/Sex/Sáb: pega a próxima quarta normal
+    """
+    # Python: seg=0, ter=1, qua=2, qui=3, sex=4, sab=5, dom=6
+    wd = hoje.weekday()
+    base = (2 - wd) % 7  # dias até quarta desta "rodada"
+
+    # Se for seg/ter/qua, joga +7 para pegar a próxima quarta (da semana seguinte)
+    if wd in (0, 1, 2):
+        base += 7
+    # Se base der 0 (não deve com a regra acima), garante +7
+    if base == 0:
+        base = 7
+
+    return hoje + timedelta(days=base)
+
 @app.get("/dashboard/resumo")
 def resumo_dashboard(
     db: Session = Depends(get_db),
@@ -494,23 +453,21 @@ def resumo_dashboard(
     de_vencimento: Optional[str] = Query(None),
 ):
     """
-    Retorna chaves que o app.js usa:
-    - total_geral
-    - total_em_dia
-    - total_atrasado
-    - total_pago
+    ✅ SAÍDA (chaves que o app.js usa):
+      - total_geral
+      - total_em_dia
+      - total_atrasado
+      - total_pago
 
-    Regra:
-    - Qui/Sex/Sab/Dom: ATRASADO se vencimento < próxima quarta
-                       EM DIA   se vencimento >= próxima quarta
-    - Seg/Ter/Qua:     ATRASADO se vencimento <= próxima quarta
-                       EM DIA   se vencimento > próxima quarta
+    ✅ Regras:
+      - quarta_ref = quarta_referencia(hoje)
+      - em_dia     = pendente com vencimento >= quarta_ref
+      - atrasado   = status "atrasado" OU pendente com vencimento < quarta_ref
+      - total_geral = em_dia + atrasado (sem pagos)
+      - pago       = status "pago"
     """
-    # ✅ atualiza status automaticamente antes de calcular
-    atualizar_status_automatico(db)
-
-    hoje = hoje_local_br()
-    prox_quarta, modo = _condicao_atraso(hoje)
+    hoje = date.today()
+    quarta_ref = quarta_referencia(hoje)
 
     query_base = db.query(FaturaDB)
 
@@ -531,59 +488,43 @@ def resumo_dashboard(
         except ValueError:
             pass
 
-    # PAGO
     total_pago = (
         query_base.filter(FaturaDB.status.ilike("pago"))
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
-    # ATRASADO:
-    # - status atrasado já marcado
-    # - OU pendente que cruza o corte da semana (regra do modo)
-    if modo == "LE":
-        cond_pendente_atrasado = and_(
+    total_em_dia = (
+        query_base.filter(
             FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento <= prox_quarta,
+            FaturaDB.data_vencimento >= quarta_ref,
         )
-        cond_em_dia = and_(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento > prox_quarta,
-        )
-    else:
-        cond_pendente_atrasado = and_(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento < prox_quarta,
-        )
-        cond_em_dia = and_(
-            FaturaDB.status.ilike("pendente"),
-            FaturaDB.data_vencimento >= prox_quarta,
-        )
+        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
+        .scalar()
+    )
 
     total_atrasado = (
         query_base.filter(
             or_(
                 FaturaDB.status.ilike("atrasado"),
-                cond_pendente_atrasado,
+                and_(
+                    FaturaDB.status.ilike("pendente"),
+                    FaturaDB.data_vencimento < quarta_ref,
+                ),
             )
         )
         .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
         .scalar()
     )
 
-    total_em_dia = (
-        query_base.filter(cond_em_dia)
-        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
-        .scalar()
-    )
-
-    total_geral = float(total_atrasado or 0) + float(total_em_dia or 0)
+    total_geral = (float(total_em_dia or 0) + float(total_atrasado or 0))
 
     return {
-        "total_geral": float(total_geral),
+        "total_geral": float(total_geral or 0),
         "total_em_dia": float(total_em_dia or 0),
         "total_atrasado": float(total_atrasado or 0),
         "total_pago": float(total_pago or 0),
+        "quarta_referencia": quarta_ref.strftime("%Y-%m-%d"),
     }
 
 @app.get("/faturas/exportar")
@@ -592,12 +533,6 @@ def exportar_faturas(
     transportadora: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
-    """
-    Exporta CSV (Excel abre normal).
-    """
-    # ✅ atualiza status automaticamente antes de exportar
-    atualizar_status_automatico(db)
-
     import csv
     import io
 
