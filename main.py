@@ -14,8 +14,7 @@ from fastapi import (
     Query,
     Request,
 )
-from fastapi.responses import FileResponse, HTMLResponse, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -31,6 +30,7 @@ from sqlalchemy import (
     func,
     and_,
     or_,
+    text,      # ✅ NOVO (migração por SQL)
 )
 from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 
@@ -82,49 +82,16 @@ def _r2_key(fatura_id: int, original_filename: str) -> str:
     return f"anexos/{fatura_id}/{uuid.uuid4().hex}_{safe_name}"
 
 # =========================
-# ✅ REGRA AUTOMÁTICA (CORRIGIDA)
-#   Corte = QUARTA-FEIRA DA SEMANA ATUAL (semana começa na SEG)
+# FUSO / DATAS
 # =========================
 
 BR_TZ = ZoneInfo(os.getenv("APP_TZ", "America/Sao_Paulo"))
 
-def hoje_local_br() -> date:
-    return datetime.now(BR_TZ).date()
-
-def agora_local_br() -> datetime:
+def agora_br() -> datetime:
     return datetime.now(BR_TZ)
 
-def quarta_da_semana_atual(hoje: date) -> date:
-    """
-    Semana começa na segunda (weekday seg=0..dom=6).
-    Retorna a quarta-feira dessa semana.
-    Ex:
-      - seg 22/12 -> quarta 24/12
-      - qua 17/12 -> quarta 17/12 (não pula pra 24!)
-      - dom 21/12 -> quarta 17/12
-    """
-    monday = hoje - timedelta(days=hoje.weekday())
-    return monday + timedelta(days=2)
-
-def atualizar_status_automatico(db: Session):
-    """
-    Atualiza:
-      pendente -> atrasado
-    Regra:
-      se data_vencimento <= quarta_da_semana_atual
-    """
-    hoje = hoje_local_br()
-    corte = quarta_da_semana_atual(hoje)
-
-    q = (
-        db.query(FaturaDB)
-        .filter(FaturaDB.status.ilike("pendente"))
-        .filter(FaturaDB.data_vencimento <= corte)
-    )
-
-    alteradas = q.update({FaturaDB.status: "atrasado"}, synchronize_session=False)
-    if alteradas:
-        db.commit()
+def hoje_local_br() -> date:
+    return agora_br().date()
 
 # =========================
 # MODELOS
@@ -141,19 +108,11 @@ class FaturaDB(Base):
     status = Column(String, default="pendente")
     observacao = Column(String, nullable=True)
 
-    # ✅ NOVO: data que marcou como pago
-    data_pagamento = Column(Date, nullable=True)
+    # ✅ NOVO: data/hora do pagamento
+    data_pagamento = Column(DateTime, nullable=True)
 
     anexos = relationship(
         "AnexoDB",
-        back_populates="fatura",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-
-    # ✅ NOVO: histórico de pagamento (quando vira pago)
-    historicos_pagamento = relationship(
-        "HistoricoPagamentoDB",
         back_populates="fatura",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -171,6 +130,7 @@ class AnexoDB(Base):
 
     fatura = relationship("FaturaDB", back_populates="anexos")
 
+
 # ✅ NOVO: tabela de histórico
 class HistoricoPagamentoDB(Base):
     __tablename__ = "historico_pagamentos"
@@ -178,18 +138,54 @@ class HistoricoPagamentoDB(Base):
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"), index=True)
 
-    pago_em = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-    # snapshot pra histórico não “mudar” se editarem depois
+    pago_em = Column(DateTime, nullable=False)
     transportadora = Column(String, nullable=False)
     responsavel = Column(String, nullable=True)
     numero_fatura = Column(String, nullable=False)
-    valor = Column(Numeric(10, 2), nullable=False, default=0)
+    valor = Column(Numeric(10, 2), nullable=False)
     data_vencimento = Column(Date, nullable=False)
 
-    fatura = relationship("FaturaDB", back_populates="historicos_pagamento")
 
+# =========================
+# ✅ MIGRAÇÃO AUTOMÁTICA (SEM PSQL)
+# =========================
+
+def ensure_schema():
+    """
+    Garante que:
+      - existe a coluna faturas.data_pagamento
+      - existe a tabela historico_pagamentos
+    Funciona mesmo sem psql no PC.
+    """
+    with engine.begin() as conn:
+        # coluna data_pagamento (se não existir)
+        try:
+            conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMP;"))
+        except Exception as e:
+            print("WARN schema: alter table faturas data_pagamento:", repr(e))
+
+        # tabela historico_pagamentos (se não existir)
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS historico_pagamentos (
+                    id SERIAL PRIMARY KEY,
+                    fatura_id INTEGER NOT NULL REFERENCES faturas(id) ON DELETE CASCADE,
+                    pago_em TIMESTAMP NOT NULL,
+                    transportadora TEXT NOT NULL,
+                    responsavel TEXT,
+                    numero_fatura TEXT NOT NULL,
+                    valor NUMERIC(10,2) NOT NULL,
+                    data_vencimento DATE NOT NULL
+                );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_historico_pagamentos_fatura_id ON historico_pagamentos(fatura_id);"))
+        except Exception as e:
+            print("WARN schema: create table historico_pagamentos:", repr(e))
+
+# cria tabelas ORM (anexos etc.)
 Base.metadata.create_all(bind=engine)
+# garante colunas/tabelas novas
+ensure_schema()
 
 # =========================
 # Pydantic
@@ -224,7 +220,7 @@ class AnexoOut(BaseModel):
 class FaturaOut(FaturaBase):
     id: int
     responsavel: Optional[str] = None
-    data_pagamento: Optional[date] = None  # ✅ NOVO
+    data_pagamento: Optional[datetime] = None  # ✅ NOVO
 
     class Config:
         orm_mode = True
@@ -232,12 +228,12 @@ class FaturaOut(FaturaBase):
 class HistoricoPagamentoOut(BaseModel):
     id: int
     fatura_id: int
+    pago_em: datetime
     transportadora: str
     responsavel: Optional[str] = None
     numero_fatura: str
     valor: float
     data_vencimento: date
-    pago_em: datetime
 
     class Config:
         orm_mode = True
@@ -276,23 +272,61 @@ def fatura_to_out(f: FaturaDB) -> FaturaOut:
     )
 
 # =========================
-# HELPERS HISTÓRICO
+# ✅ REGRA AUTOMÁTICA (CORRIGIDA)
+#   Corte = QUARTA-FEIRA DA SEMANA ATUAL (semana começa na SEG)
 # =========================
 
-def criar_registro_pagamento(db: Session, f: FaturaDB):
+def quarta_da_semana_atual(hoje: date) -> date:
+    monday = hoje - timedelta(days=hoje.weekday())
+    return monday + timedelta(days=2)
+
+def atualizar_status_automatico(db: Session):
+    hoje = hoje_local_br()
+    corte = quarta_da_semana_atual(hoje)
+
+    q = (
+        db.query(FaturaDB)
+        .filter(FaturaDB.status.ilike("pendente"))
+        .filter(FaturaDB.data_vencimento <= corte)
+    )
+
+    alteradas = q.update({FaturaDB.status: "atrasado"}, synchronize_session=False)
+    if alteradas:
+        db.commit()
+
+# =========================
+# HISTÓRICO: REGRAS
+# =========================
+
+def registrar_pagamento(db: Session, fatura: FaturaDB):
+    """
+    Cria registro de histórico se:
+      - status virar pago
+      - e não existir histórico para essa fatura
+    """
+    pago_em = agora_br()
+
+    # seta data_pagamento
+    fatura.data_pagamento = pago_em
+
+    # cria histórico
     hist = HistoricoPagamentoDB(
-        fatura_id=f.id,
-        pago_em=agora_local_br(),
-        transportadora=f.transportadora,
-        responsavel=get_responsavel(f.transportadora),
-        numero_fatura=f.numero_fatura,
-        valor=f.valor or 0,
-        data_vencimento=f.data_vencimento,
+        fatura_id=fatura.id,
+        pago_em=pago_em,
+        transportadora=fatura.transportadora,
+        responsavel=get_responsavel(fatura.transportadora),
+        numero_fatura=str(fatura.numero_fatura),
+        valor=fatura.valor or 0,
+        data_vencimento=fatura.data_vencimento,
     )
     db.add(hist)
 
-def apagar_historico_pagamento(db: Session, fatura_id: int):
-    db.query(HistoricoPagamentoDB).filter(HistoricoPagamentoDB.fatura_id == fatura_id).delete()
+def remover_historico_pagamento(db: Session, fatura_id: int):
+    """
+    Se voltar de pago -> pendente/atrasado:
+      - apaga histórico
+    """
+    db.query(HistoricoPagamentoDB).filter(HistoricoPagamentoDB.fatura_id == fatura_id).delete(synchronize_session=False)
 
 # =========================
 # DEPENDÊNCIA DB
@@ -338,21 +372,14 @@ def criar_fatura(fatura: FaturaCreate, db: Session = Depends(get_db)):
             observacao=fatura.observacao,
         )
 
-        # ✅ se já cadastrar como pago
+        # se já nascer "pago", registra
         if (fatura.status or "").lower() == "pago":
-            db_fatura.data_pagamento = hoje_local_br()
+            registrar_pagamento(db, db_fatura)
 
         db.add(db_fatura)
         db.commit()
         db.refresh(db_fatura)
-
-        # ✅ cria histórico se veio como pago
-        if (db_fatura.status or "").lower() == "pago":
-            criar_registro_pagamento(db, db_fatura)
-            db.commit()
-
         return fatura_to_out(db_fatura)
-
     except Exception as e:
         print("ERRO AO CRIAR FATURA:", repr(e))
         raise HTTPException(status_code=400, detail="Erro ao criar fatura")
@@ -406,24 +433,15 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, db: Session = Depends(
 
     status_novo = (fatura.status or "").lower()
 
-    # ✅ virou pago => salva data_pagamento + cria histórico
+    # ✅ regra do histórico
     if status_antigo != "pago" and status_novo == "pago":
-        fatura.data_pagamento = hoje_local_br()
-        db.commit()
-        db.refresh(fatura)
+        # virou pago -> registra
+        registrar_pagamento(db, fatura)
 
-        criar_registro_pagamento(db, fatura)
-        db.commit()
-        db.refresh(fatura)
-        return fatura_to_out(fatura)
-
-    # ✅ saiu de pago => limpa data_pagamento + apaga histórico
-    if status_antigo == "pago" and status_novo != "pago":
+    elif status_antigo == "pago" and status_novo != "pago":
+        # voltou de pago -> remove registro e limpa data_pagamento
         fatura.data_pagamento = None
-        apagar_historico_pagamento(db, fatura.id)
-        db.commit()
-        db.refresh(fatura)
-        return fatura_to_out(fatura)
+        remover_historico_pagamento(db, fatura_id)
 
     db.commit()
     db.refresh(fatura)
@@ -441,6 +459,7 @@ def deletar_fatura(fatura_id: int, db: Session = Depends(get_db)):
         except ClientError as e:
             print("ERRO AO APAGAR NO R2:", repr(e))
 
+    # histórico apaga por cascade (FK ON DELETE CASCADE)
     db.delete(fatura)
     db.commit()
     return {"ok": True}
@@ -536,6 +555,38 @@ def deletar_anexo(anexo_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 # =========================
+# HISTÓRICO (API)
+# =========================
+
+@app.get("/historico_pagamentos", response_model=List[HistoricoPagamentoOut])
+def listar_historico_pagamentos(
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+):
+    q = db.query(HistoricoPagamentoDB)
+
+    if transportadora:
+        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
+
+    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
+    # converte valor numeric -> float
+    out = []
+    for h in itens:
+        out.append(
+            HistoricoPagamentoOut(
+                id=h.id,
+                fatura_id=h.fatura_id,
+                pago_em=h.pago_em,
+                transportadora=h.transportadora,
+                responsavel=h.responsavel,
+                numero_fatura=h.numero_fatura,
+                valor=float(h.valor or 0),
+                data_vencimento=h.data_vencimento,
+            )
+        )
+    return out
+
+# =========================
 # DASHBOARD
 # =========================
 
@@ -611,83 +662,7 @@ def resumo_dashboard(
     }
 
 # =========================
-# ✅ HISTÓRICO DE PAGAMENTO
-# =========================
-
-@app.get("/historico_pagamentos", response_model=List[HistoricoPagamentoOut])
-def listar_historico_pagamentos(
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-):
-    q = db.query(HistoricoPagamentoDB)
-    if transportadora:
-        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
-
-    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
-
-    return [
-        HistoricoPagamentoOut(
-            id=h.id,
-            fatura_id=h.fatura_id,
-            transportadora=h.transportadora,
-            responsavel=h.responsavel,
-            numero_fatura=h.numero_fatura,
-            valor=float(h.valor or 0),
-            data_vencimento=h.data_vencimento,
-            pago_em=h.pago_em,
-        )
-        for h in itens
-    ]
-
-@app.get("/historico_pagamentos/exportar")
-def exportar_historico_pagamentos(
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-):
-    import csv
-    import io
-
-    q = db.query(HistoricoPagamentoDB)
-    if transportadora:
-        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
-    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
-
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-
-    writer.writerow(
-        [
-            "ID_HIST",
-            "ID_FATURA",
-            "Transportadora",
-            "Responsável",
-            "Número Fatura",
-            "Valor",
-            "Vencimento",
-            "Pago em (data/hora)",
-        ]
-    )
-
-    for h in itens:
-        writer.writerow(
-            [
-                h.id,
-                h.fatura_id,
-                h.transportadora,
-                h.responsavel or "",
-                h.numero_fatura,
-                float(h.valor or 0),
-                h.data_vencimento.strftime("%d/%m/%Y") if h.data_vencimento else "",
-                h.pago_em.strftime("%d/%m/%Y %H:%M:%S") if h.pago_em else "",
-            ]
-        )
-
-    csv_bytes = output.getvalue().encode("utf-8-sig")
-    headers = {"Content-Disposition": 'attachment; filename="historico_pagamentos.csv"'}
-    return Response(csv_bytes, media_type="text/csv", headers=headers)
-
-# =========================
-# EXPORT CSV (FATURAS)
+# EXPORT CSV
 # =========================
 
 @app.get("/faturas/exportar")
@@ -721,12 +696,16 @@ def exportar_faturas(
             "Valor",
             "Data Vencimento",
             "Status",
-            "Observação",
             "Data Pagamento",
+            "Observação",
         ]
     )
 
     for f in faturas:
+        dp = ""
+        if f.data_pagamento:
+            dp = f.data_pagamento.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M:%S")
+
         writer.writerow(
             [
                 f.id,
@@ -736,8 +715,8 @@ def exportar_faturas(
                 float(f.valor or 0),
                 f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
                 f.status,
+                dp,
                 f.observacao or "",
-                f.data_pagamento.strftime("%d/%m/%Y") if f.data_pagamento else "",
             ]
         )
 
