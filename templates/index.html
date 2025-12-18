@@ -70,6 +70,7 @@
       <button id="tabDashboard" class="tab active">Dashboard</button>
       <button id="tabCadastro" class="tab">Cadastro</button>
       <button id="tabFaturas" class="tab">Faturas</button>
+      <button id="tabHistorico" class="tab">Histórico</button>
     </div>
 
     <!-- DASHBOARD -->
@@ -85,7 +86,6 @@
       </div>
 
       <div class="cards" id="cardsDashboard">
-        <!-- ✅ ids para esconder/mostrar no JS -->
         <div class="card" id="cardTotalGeralBox">
           <h3>Total Geral</h3>
           <p id="cardTotalGeral">R$ 0,00</p>
@@ -101,14 +101,12 @@
           <p id="cardAtrasado">R$ 0,00</p>
         </div>
 
-        <!-- ✅ só aparece no modo PAGO -->
         <div class="card" id="cardPagoBox" style="display:none;">
           <h3>Total Pago</h3>
           <p id="cardPago">R$ 0,00</p>
         </div>
       </div>
 
-      <!-- RESUMO POR TRANSPORTADORA / BACKLOG -->
       <section class="table-section dashboard-table">
         <h2 id="tituloResumoDashboard">Resumo por transportadora</h2>
         <table class="tabela">
@@ -239,10 +237,41 @@
             <th>Vencimento</th>
             <th>Status</th>
             <th>Observação</th>
+            <th>Pagamento</th>
             <th>Ações</th>
           </tr>
           </thead>
           <tbody id="tbodyFaturas"></tbody>
+        </table>
+      </section>
+    </section>
+
+    <!-- ✅ HISTÓRICO -->
+    <section id="historicoSection" class="section">
+      <header class="filtros-header">
+        <h2>Histórico de pagamento</h2>
+
+        <div class="filtros-actions">
+          <button id="btnAtualizarHistorico" class="primary">Atualizar histórico</button>
+          <button id="btnExportarHistorico" type="button" class="secondary">Exportar Excel</button>
+        </div>
+      </header>
+
+      <section class="table-section">
+        <table class="tabela">
+          <thead>
+            <tr>
+              <th>ID Hist.</th>
+              <th>ID Fatura</th>
+              <th>Transportadora</th>
+              <th>Responsável</th>
+              <th>Nº Fatura</th>
+              <th>Valor</th>
+              <th>Vencimento</th>
+              <th>Pago em (data/hora)</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyHistorico"></tbody>
         </table>
       </section>
     </section>
