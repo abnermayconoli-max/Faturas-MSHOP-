@@ -19,6 +19,7 @@ let dashboardModo = "pendente";
 
 // Cache da última lista vinda da API
 let ultimaListaFaturas = [];
+let ultimaListaHistorico = [];
 
 // ============ HELPERS ============
 
@@ -57,11 +58,17 @@ function formatDate(isoDate) {
   return d.toLocaleDateString("pt-BR");
 }
 
+function formatDateTime(isoDateTime) {
+  if (!isoDateTime) return "";
+  const d = new Date(isoDateTime);
+  if (Number.isNaN(d.getTime())) return isoDateTime;
+  return d.toLocaleString("pt-BR");
+}
+
 // ============ DASHBOARD ============
 
 async function carregarDashboard() {
   try {
-    // título sempre correto
     const titulo = document.getElementById("tituloResumoDashboard");
     if (titulo) titulo.textContent = "Resumo por transportadora";
 
@@ -80,13 +87,11 @@ async function carregarDashboard() {
 
     const dataResumo = await respResumo.json();
 
-    // cards (boxes)
     const boxTotalGeral = document.getElementById("cardTotalGeralBox");
     const boxEmDia = document.getElementById("cardEmDiaBox");
     const boxAtrasado = document.getElementById("cardAtrasadoBox");
     const boxPago = document.getElementById("cardPagoBox");
 
-    // valores
     const elTotalGeral = document.getElementById("cardTotalGeral");
     const elEmDia = document.getElementById("cardEmDia");
     const elAtrasado = document.getElementById("cardAtrasado");
@@ -95,22 +100,18 @@ async function carregarDashboard() {
     const cardsWrap = document.getElementById("cardsDashboard");
 
     if (dashboardModo === "pago") {
-      // ✅ MOSTRA APENAS TOTAL PAGO
       if (boxTotalGeral) boxTotalGeral.style.display = "none";
       if (boxEmDia) boxEmDia.style.display = "none";
       if (boxAtrasado) boxAtrasado.style.display = "none";
       if (boxPago) boxPago.style.display = "block";
-
       if (cardsWrap) cardsWrap.classList.add("pago-only");
 
       if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago ?? 0);
     } else {
-      // ✅ MODO PENDENTE: mostra os 3 cards e esconde pago
       if (boxTotalGeral) boxTotalGeral.style.display = "block";
       if (boxEmDia) boxEmDia.style.display = "block";
       if (boxAtrasado) boxAtrasado.style.display = "block";
       if (boxPago) boxPago.style.display = "none";
-
       if (cardsWrap) cardsWrap.classList.remove("pago-only");
 
       if (elTotalGeral) elTotalGeral.textContent = formatCurrency(dataResumo.total_geral ?? 0);
@@ -119,7 +120,6 @@ async function carregarDashboard() {
       if (elPago) elPago.textContent = formatCurrency(dataResumo.total_pago ?? 0);
     }
 
-    // Tabela usando lista (cache)
     let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
     if (lista.length === 0) {
       const urlF =
@@ -150,7 +150,6 @@ function renderResumoDashboardPendente(lista) {
   const tbody = document.getElementById("tbodyResumoDashboard");
   if (!thead || !tbody) return;
 
-  // datas pendente/atrasado
   const datasSet = new Set();
   (lista || []).forEach((f) => {
     const st = (f.status || "").toLowerCase();
@@ -158,7 +157,6 @@ function renderResumoDashboardPendente(lista) {
   });
   const datas = Array.from(datasSet).sort();
 
-  // header
   let headerHtml = `
     <tr>
       <th>Responsável</th>
@@ -171,18 +169,16 @@ function renderResumoDashboardPendente(lista) {
   headerHtml += "</tr>";
   thead.innerHTML = headerHtml;
 
-  // calcular corte: "quarta da próxima semana" quando hoje é segunda, senão próxima quarta normal.
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
 
-  // próxima quarta (dom=0, seg=1, ter=2, qua=3)
   const wd = hoje.getDay();
   let diasAteQuarta = (3 - wd + 7) % 7;
   if (diasAteQuarta === 0) diasAteQuarta = 7;
+
   let inicioEmDia = new Date(hoje);
   inicioEmDia.setDate(hoje.getDate() + diasAteQuarta);
 
-  // ✅ se HOJE é SEGUNDA (1), pula mais 7 dias (vira a quarta da semana seguinte)
   if (wd === 1) {
     inicioEmDia.setDate(inicioEmDia.getDate() + 7);
   }
@@ -217,7 +213,6 @@ function renderResumoDashboardPendente(lista) {
     if (vencTime !== null) {
       if (st === "atrasado") grupos[transp].totalAtrasado += valor;
       else if (st === "pendente") {
-        // ✅ regra: em dia = vencimento >= inicioEmDia
         if (vencTime < inicioTime) grupos[transp].totalAtrasado += valor;
         else grupos[transp].totalEmDia += valor;
       }
@@ -414,7 +409,6 @@ function renderizarFaturas() {
 
   let lista = Array.isArray(ultimaListaFaturas) ? [...ultimaListaFaturas] : [];
 
-  // Filtro período (apenas aba Faturas)
   if (filtroDataInicioFaturas || filtroDataFimFaturas) {
     lista = lista.filter((f) => {
       if (!f.data_vencimento) return false;
@@ -440,13 +434,11 @@ function renderizarFaturas() {
     });
   }
 
-  // Filtro status (aba Faturas)
   if (filtroStatus) {
     const alvo = filtroStatus.toLowerCase();
     lista = lista.filter((f) => (f.status || "").toLowerCase() === alvo);
   }
 
-  // RESUMO (cards da aba Faturas)
   let total = 0;
   let pendentes = 0;
   let atrasadas = 0;
@@ -486,7 +478,7 @@ function renderizarFaturas() {
   if (lista.length === 0) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 9;
+    td.colSpan = 10;
     td.textContent = "Nenhuma fatura encontrada.";
     td.style.textAlign = "center";
     td.style.padding = "12px";
@@ -508,6 +500,7 @@ function renderizarFaturas() {
       <td>${formatDate(f.data_vencimento)}</td>
       <td>${f.status}</td>
       <td>${f.observacao ?? ""}</td>
+      <td>${f.data_pagamento ? formatDate(f.data_pagamento) : "-"}</td>
       <td class="acoes">
         <button type="button" class="menu-btn" aria-label="Ações">⋮</button>
         <div class="menu-dropdown">
@@ -520,6 +513,79 @@ function renderizarFaturas() {
 
     tbody.appendChild(tr);
   });
+}
+
+// ============ HISTÓRICO ============
+
+async function carregarHistorico() {
+  try {
+    const params = new URLSearchParams();
+    if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+
+    const url =
+      params.toString().length > 0
+        ? `${API_BASE}/historico_pagamentos?${params.toString()}`
+        : `${API_BASE}/historico_pagamentos`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("Erro ao listar histórico");
+
+    const hist = await resp.json();
+    ultimaListaHistorico = hist;
+
+    renderizarHistorico();
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao carregar histórico");
+  }
+}
+
+function renderizarHistorico() {
+  const tbody = document.getElementById("tbodyHistorico");
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+
+  const lista = Array.isArray(ultimaListaHistorico) ? [...ultimaListaHistorico] : [];
+
+  if (lista.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.textContent = "Nenhum pagamento registrado.";
+    td.style.textAlign = "center";
+    td.style.padding = "12px";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  lista.forEach((h) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${h.id}</td>
+      <td>${h.fatura_id}</td>
+      <td>${h.transportadora}</td>
+      <td>${h.responsavel ?? ""}</td>
+      <td>${h.numero_fatura}</td>
+      <td>${formatCurrency(h.valor)}</td>
+      <td>${formatDate(h.data_vencimento)}</td>
+      <td>${formatDateTime(h.pago_em)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function exportarHistorico() {
+  const params = new URLSearchParams();
+  if (filtroTransportadora) params.append("transportadora", filtroTransportadora);
+
+  const url =
+    params.toString().length > 0
+      ? `${API_BASE}/historico_pagamentos/exportar?${params.toString()}`
+      : `${API_BASE}/historico_pagamentos/exportar`;
+
+  window.open(url, "_blank");
 }
 
 // ============ MENU 3 PONTINHOS (DELEGAÇÃO) ============
@@ -636,6 +702,7 @@ async function excluirFatura(id) {
     const resp = await fetch(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
     if (!resp.ok) throw new Error("Erro ao excluir");
     await carregarFaturas();
+    await carregarHistorico();
   } catch (err) {
     console.error(err);
     alert("Erro ao excluir fatura");
@@ -785,6 +852,7 @@ async function salvarFatura(e) {
     delete form.dataset.editId;
 
     await carregarFaturas();
+    await carregarHistorico();
     ativarAba("faturas");
   } catch (err) {
     console.error(err);
@@ -798,12 +866,15 @@ function ativarAba(aba) {
   const dash = document.getElementById("dashboardSection");
   const cad = document.getElementById("cadastroSection");
   const fat = document.getElementById("faturasSection");
+  const hist = document.getElementById("historicoSection");
+
   const tabDash = document.getElementById("tabDashboard");
   const tabCad = document.getElementById("tabCadastro");
   const tabFat = document.getElementById("tabFaturas");
+  const tabHist = document.getElementById("tabHistorico");
 
-  [dash, cad, fat].forEach((s) => s.classList.remove("visible"));
-  [tabDash, tabCad, tabFat].forEach((t) => t.classList.remove("active"));
+  [dash, cad, fat, hist].forEach((s) => s.classList.remove("visible"));
+  [tabDash, tabCad, tabFat, tabHist].forEach((t) => t.classList.remove("active"));
 
   if (aba === "dashboard") {
     dash.classList.add("visible");
@@ -811,6 +882,10 @@ function ativarAba(aba) {
   } else if (aba === "cadastro") {
     cad.classList.add("visible");
     tabCad.classList.add("active");
+  } else if (aba === "historico") {
+    hist.classList.add("visible");
+    tabHist.classList.add("active");
+    carregarHistorico();
   } else {
     fat.classList.add("visible");
     tabFat.classList.add("active");
@@ -837,12 +912,11 @@ function exportarExcel() {
 document.addEventListener("DOMContentLoaded", () => {
   setupMenuDelegation();
 
-  // Abas
   document.getElementById("tabDashboard").addEventListener("click", () => ativarAba("dashboard"));
   document.getElementById("tabCadastro").addEventListener("click", () => ativarAba("cadastro"));
   document.getElementById("tabFaturas").addEventListener("click", () => ativarAba("faturas"));
+  document.getElementById("tabHistorico").addEventListener("click", () => ativarAba("historico"));
 
-  // botões pendente/pago
   const btnPend = document.getElementById("btnDashboardPendente");
   const btnPago = document.getElementById("btnDashboardPago");
 
@@ -862,7 +936,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Botão página inicial
   document.getElementById("btnHome").addEventListener("click", () => {
     filtroTransportadora = "";
     filtroVencimentoDe = "";
@@ -898,19 +971,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
     ativarAba("dashboard");
     carregarFaturas();
+    carregarHistorico();
   });
 
-  // Transportadoras sidebar
   document.querySelectorAll(".transportadora-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       filtroTransportadora = btn.dataset.transportadora || "";
       document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       carregarFaturas();
+      carregarHistorico();
     })
   );
 
-  // filtro vencimento sidebar (De / Até)
   const inputDe = document.getElementById("filtroVencimentoDe");
   const inputAte = document.getElementById("filtroVencimentoAte");
 
@@ -927,7 +1000,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Limpar filtros (sidebar)
   const btnLimparFiltros = document.getElementById("btnLimparFiltros");
   if (btnLimparFiltros) {
     btnLimparFiltros.addEventListener("click", () => {
@@ -953,10 +1025,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (statusSelect) statusSelect.value = "";
 
       carregarFaturas();
+      carregarHistorico();
     });
   }
 
-  // Limpar filtro do período (aba Faturas)
   const btnLimparPeriodoFaturas = document.getElementById("btnLimparPeriodoFaturas");
   if (btnLimparPeriodoFaturas) {
     btnLimparPeriodoFaturas.addEventListener("click", () => {
@@ -972,7 +1044,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Busca nº fatura
   const buscaNumero = document.getElementById("buscaNumero");
   if (buscaNumero) {
     buscaNumero.addEventListener("input", (e) => {
@@ -981,48 +1052,29 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Filtro por período da aba Faturas
   const ini = document.getElementById("filtroDataInicioFaturas");
   const fim = document.getElementById("filtroDataFimFaturas");
-  if (ini) {
-    ini.addEventListener("change", (e) => {
-      filtroDataInicioFaturas = e.target.value;
-      renderizarFaturas();
-    });
-  }
-  if (fim) {
-    fim.addEventListener("change", (e) => {
-      filtroDataFimFaturas = e.target.value;
-      renderizarFaturas();
-    });
-  }
+  if (ini) ini.addEventListener("change", (e) => (filtroDataInicioFaturas = e.target.value, renderizarFaturas()));
+  if (fim) fim.addEventListener("change", (e) => (filtroDataFimFaturas = e.target.value, renderizarFaturas()));
 
-  // Filtro por STATUS (aba faturas)
   const statusSelect = document.getElementById("filtroStatus");
-  if (statusSelect) {
-    statusSelect.addEventListener("change", (e) => {
-      filtroStatus = e.target.value;
-      renderizarFaturas();
-    });
-  }
+  if (statusSelect) statusSelect.addEventListener("change", (e) => (filtroStatus = e.target.value, renderizarFaturas()));
 
-  // Atualizar lista manualmente
   const btnAtualizar = document.getElementById("btnAtualizarFaturas");
-  if (btnAtualizar) {
-    btnAtualizar.addEventListener("click", (e) => {
-      e.preventDefault();
-      carregarFaturas();
-    });
-  }
+  if (btnAtualizar) btnAtualizar.addEventListener("click", (e) => (e.preventDefault(), carregarFaturas()));
 
-  // Exportar Excel
   const btnExportar = document.getElementById("btnExportarExcel");
   if (btnExportar) btnExportar.addEventListener("click", exportarExcel);
 
-  // Formulário
+  // ✅ histórico botões
+  const btnAtualizarHistorico = document.getElementById("btnAtualizarHistorico");
+  if (btnAtualizarHistorico) btnAtualizarHistorico.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
+
+  const btnExportarHistorico = document.getElementById("btnExportarHistorico");
+  if (btnExportarHistorico) btnExportarHistorico.addEventListener("click", exportarHistorico);
+
   document.getElementById("formFatura").addEventListener("submit", salvarFatura);
 
-  // Modal anexos
   document.getElementById("modalFechar").addEventListener("click", () =>
     document.getElementById("modalAnexos").classList.remove("open")
   );
@@ -1032,6 +1084,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Primeira carga
   carregarFaturas();
+  carregarHistorico();
 });
