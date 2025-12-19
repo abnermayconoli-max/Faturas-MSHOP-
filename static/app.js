@@ -150,6 +150,7 @@ function renderResumoDashboardPendente(lista) {
   const tbody = document.getElementById("tbodyResumoDashboard");
   if (!thead || !tbody) return;
 
+  // datas pendente/atrasado
   const datasSet = new Set();
   (lista || []).forEach((f) => {
     const st = (f.status || "").toLowerCase();
@@ -157,6 +158,7 @@ function renderResumoDashboardPendente(lista) {
   });
   const datas = Array.from(datasSet).sort();
 
+  // header
   let headerHtml = `
     <tr>
       <th>Responsável</th>
@@ -169,22 +171,25 @@ function renderResumoDashboardPendente(lista) {
   headerHtml += "</tr>";
   thead.innerHTML = headerHtml;
 
+  // calcular corte: "quarta da próxima semana" quando hoje é segunda, senão próxima quarta normal.
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
 
+  // próxima quarta (dom=0, seg=1, ter=2, qua=3)
   const wd = hoje.getDay();
   let diasAteQuarta = (3 - wd + 7) % 7;
   if (diasAteQuarta === 0) diasAteQuarta = 7;
-
   let inicioEmDia = new Date(hoje);
   inicioEmDia.setDate(hoje.getDate() + diasAteQuarta);
 
+  // ✅ se HOJE é SEGUNDA (1), pula mais 7 dias (vira a quarta da semana seguinte)
   if (wd === 1) {
     inicioEmDia.setDate(inicioEmDia.getDate() + 7);
   }
   inicioEmDia.setHours(0, 0, 0, 0);
   const inicioTime = inicioEmDia.getTime();
 
+  // agrupa por transportadora, mantendo o responsavel
   const grupos = {};
   (lista || []).forEach((f) => {
     const transp = f.transportadora || "Sem nome";
@@ -202,7 +207,6 @@ function renderResumoDashboardPendente(lista) {
 
     const valor = Number(f.valor || 0);
     const st = (f.status || "").toLowerCase();
-
     if (st === "pago") return;
 
     grupos[transp].totalGeral += valor;
@@ -211,8 +215,10 @@ function renderResumoDashboardPendente(lista) {
     const vencTime = d ? d.setHours(0, 0, 0, 0) : null;
 
     if (vencTime !== null) {
-      if (st === "atrasado") grupos[transp].totalAtrasado += valor;
-      else if (st === "pendente") {
+      if (st === "atrasado") {
+        grupos[transp].totalAtrasado += valor;
+      } else if (st === "pendente") {
+        // ✅ regra: em dia = vencimento >= inicioEmDia
         if (vencTime < inicioTime) grupos[transp].totalAtrasado += valor;
         else grupos[transp].totalEmDia += valor;
       }
@@ -222,26 +228,91 @@ function renderResumoDashboardPendente(lista) {
     grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
   });
 
+  // ordem fixa (para garantir agrupamento bonito por responsável)
+  const transpOrder = ["DHL", "Pannan", "Transbritto", "PDA", "GLM", "Garcia", "Excargo"];
+  const ordem = Object.keys(grupos).sort((a, b) => {
+    const ia = transpOrder.indexOf(a);
+    const ib = transpOrder.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
   tbody.innerHTML = "";
 
+  // totais gerais
   let totalGeralAtrasado = 0;
   let totalGeralEmDia = 0;
   let totalGeral = 0;
   const totaisPorData = {};
 
-  const ordem = Object.keys(grupos);
+  // subtotal por responsável
+  let respAtual = null;
+  let subAtrasado = 0;
+  let subEmDia = 0;
+  let subGeral = 0;
+  let subPorData = {};
+
+  function flushSubtotalResponsavel() {
+    if (!respAtual) return;
+
+    const trTotalResp = document.createElement("tr");
+    let html = `
+      <td><strong>${respAtual || "-"}</strong></td>
+      <td><strong>Total</strong></td>
+      <td><strong>${formatCurrency(subAtrasado)}</strong></td>
+      <td><strong>${formatCurrency(subEmDia)}</strong></td>
+      <td><strong>${formatCurrency(subGeral)}</strong></td>
+    `;
+    datas.forEach((d) => {
+      const v = subPorData[d] || 0;
+      html += `<td><strong>${v ? formatCurrency(v) : "-"}</strong></td>`;
+    });
+    trTotalResp.innerHTML = html;
+    tbody.appendChild(trTotalResp);
+
+    // ✅ linha em branco (igual na sua 1ª imagem)
+    const spacer = document.createElement("tr");
+    spacer.className = "spacer-row";
+    spacer.innerHTML = `<td colspan="${5 + datas.length}">&nbsp;</td>`;
+    tbody.appendChild(spacer);
+
+    // reseta subtotais
+    subAtrasado = 0;
+    subEmDia = 0;
+    subGeral = 0;
+    subPorData = {};
+  }
+
   ordem.forEach((transp) => {
     const g = grupos[transp];
+    const resp = g.responsavel || "-";
 
+    // quando muda o responsável, fecha o subtotal do anterior
+    if (respAtual === null) respAtual = resp;
+    if (resp !== respAtual) {
+      flushSubtotalResponsavel();
+      respAtual = resp;
+    }
+
+    // acumula total geral
     totalGeralAtrasado += g.totalAtrasado;
     totalGeralEmDia += g.totalEmDia;
     totalGeral += g.totalGeral;
 
+    // acumula subtotal do responsável
+    subAtrasado += g.totalAtrasado;
+    subEmDia += g.totalEmDia;
+    subGeral += g.totalGeral;
+
     datas.forEach((d) => {
       const v = g.porData[d] || 0;
       totaisPorData[d] = (totaisPorData[d] || 0) + v;
+      subPorData[d] = (subPorData[d] || 0) + v;
     });
 
+    // linha normal
     const tr = document.createElement("tr");
     let html = `
       <td>${g.responsavel || "-"}</td>
@@ -256,15 +327,12 @@ function renderResumoDashboardPendente(lista) {
     });
     tr.innerHTML = html;
     tbody.appendChild(tr);
-
-    if (transp === "Pannan" || transp === "GLM") {
-      const spacer = document.createElement("tr");
-      spacer.className = "spacer-row";
-      spacer.innerHTML = `<td colspan="${5 + datas.length}">&nbsp;</td>`;
-      tbody.appendChild(spacer);
-    }
   });
 
+  // fecha o último responsável
+  if (ordem.length > 0) flushSubtotalResponsavel();
+
+  // total geral final
   if (Object.keys(grupos).length > 0) {
     const trTotal = document.createElement("tr");
     let html = `
@@ -322,19 +390,71 @@ function renderResumoDashboardPago(lista) {
     grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
   });
 
+  // ordem fixa (igual pendente)
+  const transpOrder = ["DHL", "Pannan", "Transbritto", "PDA", "GLM", "Garcia", "Excargo"];
+  const ordem = Object.keys(grupos).sort((a, b) => {
+    const ia = transpOrder.indexOf(a);
+    const ib = transpOrder.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
   tbody.innerHTML = "";
 
   const totaisPorData = {};
   let totalGeralPago = 0;
 
-  Object.keys(grupos).forEach((transp) => {
+  // subtotal por responsável
+  let respAtual = null;
+  let subPago = 0;
+  let subPorData = {};
+
+  function flushSubtotalResponsavel() {
+    if (!respAtual) return;
+
+    const trTotalResp = document.createElement("tr");
+    let html = `
+      <td><strong>${respAtual || "-"}</strong></td>
+      <td><strong>Total</strong></td>
+      <td><strong>${formatCurrency(subPago)}</strong></td>
+    `;
+    datas.forEach((d) => {
+      const v = subPorData[d] || 0;
+      html += `<td><strong>${v ? formatCurrency(v) : "-"}</strong></td>`;
+    });
+    trTotalResp.innerHTML = html;
+    tbody.appendChild(trTotalResp);
+
+    // ✅ linha em branco
+    const spacer = document.createElement("tr");
+    spacer.className = "spacer-row";
+    spacer.innerHTML = `<td colspan="${3 + datas.length}">&nbsp;</td>`;
+    tbody.appendChild(spacer);
+
+    subPago = 0;
+    subPorData = {};
+  }
+
+  ordem.forEach((transp) => {
     const g = grupos[transp];
+    const resp = g.responsavel || "-";
+
+    if (respAtual === null) respAtual = resp;
+    if (resp !== respAtual) {
+      flushSubtotalResponsavel();
+      respAtual = resp;
+    }
+
     totalGeralPago += g.totalPago;
 
     datas.forEach((d) => {
       const v = g.porData[d] || 0;
       totaisPorData[d] = (totaisPorData[d] || 0) + v;
+      subPorData[d] = (subPorData[d] || 0) + v;
     });
+    subPago += g.totalPago;
 
     const tr = document.createElement("tr");
     let html = `
@@ -349,15 +469,11 @@ function renderResumoDashboardPago(lista) {
 
     tr.innerHTML = html;
     tbody.appendChild(tr);
-
-    if (transp === "Pannan" || transp === "GLM") {
-      const spacer = document.createElement("tr");
-      spacer.className = "spacer-row";
-      spacer.innerHTML = `<td colspan="${3 + datas.length}">&nbsp;</td>`;
-      tbody.appendChild(spacer);
-    }
   });
 
+  if (ordem.length > 0) flushSubtotalResponsavel();
+
+  // total geral
   const trTotal = document.createElement("tr");
   let html = `
     <td><strong>-</strong></td>
@@ -667,9 +783,7 @@ function setupMenuDelegation() {
       const id = tr ? tr.dataset.faturaId : null;
       if (!id) return;
 
-      const faturaObj = (ultimaListaFaturas || []).find(
-        (f) => String(f.id) === String(id)
-      );
+      const faturaObj = (ultimaListaFaturas || []).find((f) => String(f.id) === String(id));
 
       if (acao === "excluir") {
         await excluirFatura(id);
@@ -841,7 +955,9 @@ async function salvarFatura(e) {
 
         console.error("Erro ao enviar anexos:", respAnexos.status, detalhe);
         alert(
-          `A fatura foi salva, mas o upload do anexo FALHOU.\n\nStatus: ${respAnexos.status}\n${detalhe || ""}`
+          `A fatura foi salva, mas o upload do anexo FALHOU.\n\nStatus: ${respAnexos.status}\n${
+            detalhe || ""
+          }`
         );
       } else {
         inputAnexos.value = "";
@@ -977,7 +1093,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".transportadora-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       filtroTransportadora = btn.dataset.transportadora || "";
-      document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
+      document
+        .querySelectorAll(".transportadora-btn")
+        .forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       carregarFaturas();
       carregarHistorico();
@@ -1054,11 +1172,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const ini = document.getElementById("filtroDataInicioFaturas");
   const fim = document.getElementById("filtroDataFimFaturas");
-  if (ini) ini.addEventListener("change", (e) => (filtroDataInicioFaturas = e.target.value, renderizarFaturas()));
-  if (fim) fim.addEventListener("change", (e) => (filtroDataFimFaturas = e.target.value, renderizarFaturas()));
+  if (ini)
+    ini.addEventListener("change", (e) => ((filtroDataInicioFaturas = e.target.value), renderizarFaturas()));
+  if (fim)
+    fim.addEventListener("change", (e) => ((filtroDataFimFaturas = e.target.value), renderizarFaturas()));
 
   const statusSelect = document.getElementById("filtroStatus");
-  if (statusSelect) statusSelect.addEventListener("change", (e) => (filtroStatus = e.target.value, renderizarFaturas()));
+  if (statusSelect)
+    statusSelect.addEventListener("change", (e) => ((filtroStatus = e.target.value), renderizarFaturas()));
 
   const btnAtualizar = document.getElementById("btnAtualizarFaturas");
   if (btnAtualizar) btnAtualizar.addEventListener("click", (e) => (e.preventDefault(), carregarFaturas()));
@@ -1068,7 +1189,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ✅ histórico botões
   const btnAtualizarHistorico = document.getElementById("btnAtualizarHistorico");
-  if (btnAtualizarHistorico) btnAtualizarHistorico.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
+  if (btnAtualizarHistorico)
+    btnAtualizarHistorico.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
 
   const btnExportarHistorico = document.getElementById("btnExportarHistorico");
   if (btnExportarHistorico) btnExportarHistorico.addEventListener("click", exportarHistorico);
