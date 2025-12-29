@@ -111,9 +111,6 @@ BOOTSTRAP_ADMIN_USER = os.getenv("BOOTSTRAP_ADMIN_USER", "").strip()
 BOOTSTRAP_ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
 BOOTSTRAP_ADMIN_EMAIL = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip() or None
 
-# Cookies seguros no HTTPS.
-# No Render é HTTPS, então secure=True ok.
-# Se você testar local com HTTP, deixe DEBUG=1 pra secure=False.
 COOKIE_SECURE = False if DEBUG else True
 
 # =========================
@@ -259,6 +256,12 @@ Base.metadata.create_all(bind=engine)
 
 def ensure_schema():
     with engine.begin() as conn:
+        # --- faturas: garante colunas em bancos antigos (✅ CORREÇÃO DO 500) ---
+        conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS transportadora TEXT;"))
+        conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS numero_fatura TEXT;"))
+        conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendente';"))
+        conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS observacao TEXT;"))
+
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMPTZ;"))
         try:
             conn.execute(text("""
@@ -269,6 +272,7 @@ def ensure_schema():
         except Exception as e:
             print("WARN schema: alter faturas.data_pagamento -> timestamptz:", repr(e))
 
+        # --- historico_pagamentos ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS historico_pagamentos (
                 id SERIAL PRIMARY KEY,
@@ -291,6 +295,7 @@ def ensure_schema():
         except Exception as e:
             print("WARN schema: alter historico_pagamentos.pago_em -> timestamptz:", repr(e))
 
+        # --- users ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -312,6 +317,7 @@ def ensure_schema():
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;"))
 
+        # --- transportadoras ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS transportadoras (
                 id SERIAL PRIMARY KEY,
@@ -321,6 +327,7 @@ def ensure_schema():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transportadoras_nome ON transportadoras(nome);"))
 
+        # --- password_resets ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS password_resets (
                 id SERIAL PRIMARY KEY,
@@ -482,7 +489,6 @@ def get_session_csrf(request: Request) -> Optional[str]:
     return payload.get("csrf")
 
 def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
-    # ✅ melhora: se o HTML não mandar csrf, tenta usar o cookie (evita 400 “campo obrigatório”)
     if not csrf_form_value:
         csrf_form_value = request.cookies.get(CSRF_COOKIE)
 
@@ -495,7 +501,6 @@ def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
     if not csrf_cookie:
         return False
 
-    # Se ainda não existe sessão (primeiro acesso), valida pelo cookie.
     if not csrf_session:
         return hmac.compare_digest(csrf_form_value, csrf_cookie)
 
@@ -638,9 +643,8 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="2.0.2")
+app = FastAPI(title="Sistema de Faturas", version="2.0.3")
 
-# ✅ usa a pasta detectada
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
@@ -665,7 +669,7 @@ def bootstrap_admin(db: Session):
             pwd_salt=salt,
             pwd_hash=pwd_hash,
             must_change_password=1,
-            password_expires_at=now,  # força troca
+            password_expires_at=now,
             created_at=now,
         )
         db.add(user)
@@ -856,7 +860,6 @@ def forgot_action(
     if not user and val:
         user = db.query(UserDB).filter(UserDB.email == val).first()
 
-    # msg genérica
     if not user:
         return templates.TemplateResponse(
             TPL_FORGOT,
@@ -1124,17 +1127,31 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
         status=fatura.status,
         observacao=fatura.observacao,
     )
+
+    db.add(db_fatura)
+    db.commit()
+    db.refresh(db_fatura)
+
+    if (db_fatura.status or "").lower() == "pago":
+        resp_nome = get_responsavel(db, db_fatura.transportadora)
+        registrar_pagamento(db, db_fatura, resp_nome)
+        db.commit()
+        db.refresh(db_fatura)
+
+    return fatura_to_out(db, db_fatura)
+
 # =========================
 # HISTÓRICO (API)
 # =========================
 
-@app.get("/historico", response_model=List[HistoricoPagamentoOut])
-def listar_historico(
+# ✅ (NOVO) endpoint que o app.js está chamando: /historico_pagamentos
+@app.get("/historico_pagamentos", response_model=List[HistoricoPagamentoOut])
+def listar_historico_pagamentos(
     request: Request,
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    de: Optional[str] = Query(None),   # yyyy-mm-dd
-    ate: Optional[str] = Query(None),  # yyyy-mm-dd
+    de: Optional[str] = Query(None),
+    ate: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
@@ -1164,15 +1181,24 @@ def listar_historico(
     itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
     return itens
 
-    
-    if (fatura.status or "").lower() == "pago":
-        resp_nome = get_responsavel(db, db_fatura.transportadora)
-        registrar_pagamento(db, db_fatura, resp_nome)
-
-    db.add(db_fatura)
-    db.commit()
-    db.refresh(db_fatura)
-    return fatura_to_out(db, db_fatura)
+# (mantém o antigo também, para compatibilidade)
+@app.get("/historico", response_model=List[HistoricoPagamentoOut])
+def listar_historico(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+    de: Optional[str] = Query(None),
+    ate: Optional[str] = Query(None),
+    numero_fatura: Optional[str] = Query(None),
+):
+    return listar_historico_pagamentos(
+        request=request,
+        db=db,
+        transportadora=transportadora,
+        de=de,
+        ate=ate,
+        numero_fatura=numero_fatura,
+    )
 
 @app.get("/faturas", response_model=List[FaturaOut])
 def listar_faturas(
