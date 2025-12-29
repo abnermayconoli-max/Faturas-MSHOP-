@@ -21,6 +21,9 @@ let dashboardModo = "pendente";
 let ultimaListaFaturas = [];
 let ultimaListaHistorico = [];
 
+// ✅ usuário logado (/me)
+let usuarioLogado = null;
+
 // ============ HELPERS ============
 
 function formatCurrency(valor) {
@@ -65,6 +68,105 @@ function formatDateTime(isoDateTime) {
   return d.toLocaleString("pt-BR");
 }
 
+// ✅ fetch com tratamento de auth
+async function fetchJson(url, options = {}) {
+  const resp = await fetch(url, options);
+
+  // se caiu sessão
+  if (resp.status === 401) {
+    window.location.href = "/login?next=/";
+    return null;
+  }
+  // se precisa trocar senha
+  if (resp.status === 403) {
+    window.location.href = "/change-password";
+    return null;
+  }
+
+  if (!resp.ok) {
+    // tenta ler JSON detail
+    let detalhe = "";
+    try {
+      const ct = resp.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const j = await resp.json();
+        detalhe = j?.detail ? String(j.detail) : JSON.stringify(j);
+      } else {
+        detalhe = await resp.text();
+      }
+    } catch (_) {}
+    const err = new Error(`HTTP ${resp.status} - ${detalhe || "Erro"}`);
+    err.status = resp.status;
+    err.detail = detalhe;
+    throw err;
+  }
+
+  const ct = resp.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return await resp.json();
+  return await resp.text();
+}
+
+// ✅ carrega /me e preenche Perfil
+async function carregarUsuarioLogado() {
+  try {
+    usuarioLogado = await fetchJson(`${API_BASE}/me`);
+    renderPerfil();
+  } catch (e) {
+    console.error("Erro ao carregar /me:", e);
+    // se der erro, não bloqueia o site
+  }
+}
+
+// ✅ render perfil
+function renderPerfil() {
+  const box = document.getElementById("perfilBox");
+  if (!box) return;
+
+  if (!usuarioLogado) {
+    box.innerHTML = `<p>Não foi possível carregar o perfil.</p>`;
+    return;
+  }
+
+  const role = (usuarioLogado.role || "").toLowerCase();
+  const isAdmin = role === "admin";
+
+  box.innerHTML = `
+    <div class="perfil-grid">
+      <div class="perfil-card">
+        <h3>Seu perfil</h3>
+        <p><strong>Usuário:</strong> ${usuarioLogado.username || "-"}</p>
+        <p><strong>Email:</strong> ${usuarioLogado.email || "-"}</p>
+        <p><strong>Permissão:</strong> ${usuarioLogado.role || "-"}</p>
+      </div>
+
+      <div class="perfil-card">
+        <h3>Ações</h3>
+        <div class="perfil-actions">
+          <a class="primary-link" href="/change-password">Trocar senha</a>
+          <button id="btnLogout" type="button" class="btn-warn">Sair</button>
+          ${
+            isAdmin
+              ? `<button id="btnAdmin" type="button" class="secondary">Configurações (Admin)</button>`
+              : ""
+          }
+        </div>
+        ${
+          isAdmin
+            ? `<p class="perfil-hint">Como admin, você pode cadastrar usuários, adicionar transportadoras e definir responsáveis.</p>`
+            : `<p class="perfil-hint">Se você precisar de permissões de admin, fale com o administrador.</p>`
+        }
+      </div>
+    </div>
+  `;
+
+  // listeners
+  const btnLogout = document.getElementById("btnLogout");
+  if (btnLogout) btnLogout.addEventListener("click", () => (window.location.href = "/logout"));
+
+  const btnAdmin = document.getElementById("btnAdmin");
+  if (btnAdmin) btnAdmin.addEventListener("click", () => (window.location.href = "/admin"));
+}
+
 // ============ DASHBOARD ============
 
 async function carregarDashboard() {
@@ -82,10 +184,8 @@ async function carregarDashboard() {
         ? `${API_BASE}/dashboard/resumo?${params.toString()}`
         : `${API_BASE}/dashboard/resumo`;
 
-    const respResumo = await fetch(urlResumo);
-    if (!respResumo.ok) throw new Error("Erro ao buscar resumo");
-
-    const dataResumo = await respResumo.json();
+    const dataResumo = await fetchJson(urlResumo);
+    if (!dataResumo) return;
 
     const boxTotalGeral = document.getElementById("cardTotalGeralBox");
     const boxEmDia = document.getElementById("cardEmDiaBox");
@@ -127,9 +227,8 @@ async function carregarDashboard() {
           ? `${API_BASE}/faturas?${params.toString()}`
           : `${API_BASE}/faturas`;
 
-      const respFat = await fetch(urlF);
-      if (!respFat.ok) throw new Error("Erro ao buscar faturas");
-      lista = await respFat.json();
+      lista = await fetchJson(urlF);
+      if (!lista) return;
     }
 
     if (dashboardModo === "pago") {
@@ -503,10 +602,9 @@ async function carregarFaturas() {
         ? `${API_BASE}/faturas?${params.toString()}`
         : `${API_BASE}/faturas`;
 
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error("Erro ao listar faturas");
+    const faturas = await fetchJson(url);
+    if (!faturas) return;
 
-    const faturas = await resp.json();
     ultimaListaFaturas = faturas;
 
     renderizarFaturas();
@@ -643,10 +741,9 @@ async function carregarHistorico() {
         ? `${API_BASE}/historico_pagamentos?${params.toString()}`
         : `${API_BASE}/historico_pagamentos`;
 
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error("Erro ao listar histórico");
+    const hist = await fetchJson(url);
+    if (!hist) return;
 
-    const hist = await resp.json();
     ultimaListaHistorico = hist;
 
     renderizarHistorico();
@@ -813,8 +910,7 @@ async function excluirFatura(id) {
   if (!confirm(`Excluir fatura ${id}?`)) return;
 
   try {
-    const resp = await fetch(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
-    if (!resp.ok) throw new Error("Erro ao excluir");
+    await fetchJson(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
     await carregarFaturas();
     await carregarHistorico();
   } catch (err) {
@@ -840,9 +936,8 @@ async function abrirModalAnexos(faturaId) {
   lista.innerHTML = "Carregando...";
 
   try {
-    const resp = await fetch(`${API_BASE}/faturas/${faturaId}/anexos`);
-    if (!resp.ok) throw new Error("Erro ao listar anexos");
-    const anexos = await resp.json();
+    const anexos = await fetchJson(`${API_BASE}/faturas/${faturaId}/anexos`);
+    if (!anexos) return;
 
     if (!anexos.length) {
       lista.innerHTML = "<li>Sem anexos.</li>";
@@ -869,10 +964,7 @@ async function abrirModalAnexos(faturaId) {
           if (!confirm(`Excluir o anexo "${a.original_name}"?`)) return;
 
           try {
-            const respDel = await fetch(`${API_BASE}/anexos/${a.id}`, {
-              method: "DELETE",
-            });
-            if (!respDel.ok) throw new Error("Erro ao excluir anexo");
+            await fetchJson(`${API_BASE}/anexos/${a.id}`, { method: "DELETE" });
             abrirModalAnexos(faturaId);
           } catch (err) {
             console.error(err);
@@ -914,53 +1006,37 @@ async function salvarFatura(e) {
     let resp;
 
     if (editId) {
-      resp = await fetch(`${API_BASE}/faturas/${editId}`, {
+      resp = await fetchJson(`${API_BASE}/faturas/${editId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     } else {
-      resp = await fetch(`${API_BASE}/faturas`, {
+      resp = await fetchJson(`${API_BASE}/faturas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     }
 
-    if (!resp.ok) throw new Error("Erro ao salvar fatura");
+    if (!resp) return;
 
-    const fatura = await resp.json();
+    const fatura = resp;
 
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos && inputAnexos.files && inputAnexos.files.length > 0) {
       const fd = new FormData();
       for (const file of inputAnexos.files) fd.append("files", file);
 
-      const respAnexos = await fetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
-        method: "POST",
-        body: fd,
-      });
-
-      if (!respAnexos.ok) {
-        let detalhe = "";
-        try {
-          const ct = respAnexos.headers.get("content-type") || "";
-          if (ct.includes("application/json")) {
-            const j = await respAnexos.json();
-            detalhe = j?.detail ? String(j.detail) : JSON.stringify(j);
-          } else {
-            detalhe = await respAnexos.text();
-          }
-        } catch (_) {}
-
-        console.error("Erro ao enviar anexos:", respAnexos.status, detalhe);
-        alert(
-          `A fatura foi salva, mas o upload do anexo FALHOU.\n\nStatus: ${respAnexos.status}\n${
-            detalhe || ""
-          }`
-        );
-      } else {
+      try {
+        await fetchJson(`${API_BASE}/faturas/${fatura.id}/anexos`, {
+          method: "POST",
+          body: fd,
+        });
         inputAnexos.value = "";
+      } catch (e) {
+        console.error("Erro upload anexos:", e);
+        alert(`A fatura foi salva, mas o upload do anexo FALHOU.\n\n${e.message || ""}`);
       }
     }
 
@@ -983,14 +1059,21 @@ function ativarAba(aba) {
   const cad = document.getElementById("cadastroSection");
   const fat = document.getElementById("faturasSection");
   const hist = document.getElementById("historicoSection");
+  const perfil = document.getElementById("perfilSection"); // ✅ novo
 
   const tabDash = document.getElementById("tabDashboard");
   const tabCad = document.getElementById("tabCadastro");
   const tabFat = document.getElementById("tabFaturas");
   const tabHist = document.getElementById("tabHistorico");
+  const tabPerfil = document.getElementById("tabPerfil"); // ✅ novo
 
-  [dash, cad, fat, hist].forEach((s) => s.classList.remove("visible"));
-  [tabDash, tabCad, tabFat, tabHist].forEach((t) => t.classList.remove("active"));
+  [dash, cad, fat, hist, perfil].forEach((s) => {
+    if (s) s.classList.remove("visible");
+  });
+
+  [tabDash, tabCad, tabFat, tabHist, tabPerfil].forEach((t) => {
+    if (t) t.classList.remove("active");
+  });
 
   if (aba === "dashboard") {
     dash.classList.add("visible");
@@ -1002,6 +1085,10 @@ function ativarAba(aba) {
     hist.classList.add("visible");
     tabHist.classList.add("active");
     carregarHistorico();
+  } else if (aba === "perfil") {
+    if (perfil) perfil.classList.add("visible");
+    if (tabPerfil) tabPerfil.classList.add("active");
+    renderPerfil();
   } else {
     fat.classList.add("visible");
     tabFat.classList.add("active");
@@ -1028,10 +1115,17 @@ function exportarExcel() {
 document.addEventListener("DOMContentLoaded", () => {
   setupMenuDelegation();
 
-  document.getElementById("tabDashboard").addEventListener("click", () => ativarAba("dashboard"));
-  document.getElementById("tabCadastro").addEventListener("click", () => ativarAba("cadastro"));
-  document.getElementById("tabFaturas").addEventListener("click", () => ativarAba("faturas"));
-  document.getElementById("tabHistorico").addEventListener("click", () => ativarAba("historico"));
+  const tabDashboard = document.getElementById("tabDashboard");
+  const tabCadastro = document.getElementById("tabCadastro");
+  const tabFaturas = document.getElementById("tabFaturas");
+  const tabHistorico = document.getElementById("tabHistorico");
+  const tabPerfil = document.getElementById("tabPerfil"); // ✅ novo
+
+  if (tabDashboard) tabDashboard.addEventListener("click", () => ativarAba("dashboard"));
+  if (tabCadastro) tabCadastro.addEventListener("click", () => ativarAba("cadastro"));
+  if (tabFaturas) tabFaturas.addEventListener("click", () => ativarAba("faturas"));
+  if (tabHistorico) tabHistorico.addEventListener("click", () => ativarAba("historico"));
+  if (tabPerfil) tabPerfil.addEventListener("click", () => ativarAba("perfil"));
 
   const btnPend = document.getElementById("btnDashboardPendente");
   const btnPago = document.getElementById("btnDashboardPago");
@@ -1052,50 +1146,51 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  document.getElementById("btnHome").addEventListener("click", () => {
-    filtroTransportadora = "";
-    filtroVencimentoDe = "";
-    filtroVencimentoAte = "";
-    filtroNumeroFatura = "";
-    filtroDataInicioFaturas = "";
-    filtroDataFimFaturas = "";
-    filtroStatus = "";
+  const btnHome = document.getElementById("btnHome");
+  if (btnHome) {
+    btnHome.addEventListener("click", () => {
+      filtroTransportadora = "";
+      filtroVencimentoDe = "";
+      filtroVencimentoAte = "";
+      filtroNumeroFatura = "";
+      filtroDataInicioFaturas = "";
+      filtroDataFimFaturas = "";
+      filtroStatus = "";
 
-    const de = document.getElementById("filtroVencimentoDe");
-    const ate = document.getElementById("filtroVencimentoAte");
-    if (de) de.value = "";
-    if (ate) ate.value = "";
+      const de = document.getElementById("filtroVencimentoDe");
+      const ate = document.getElementById("filtroVencimentoAte");
+      if (de) de.value = "";
+      if (ate) ate.value = "";
 
-    const buscaNumero = document.getElementById("buscaNumero");
-    if (buscaNumero) buscaNumero.value = "";
+      const buscaNumero = document.getElementById("buscaNumero");
+      if (buscaNumero) buscaNumero.value = "";
 
-    const ini = document.getElementById("filtroDataInicioFaturas");
-    const fim = document.getElementById("filtroDataFimFaturas");
-    if (ini) ini.value = "";
-    if (fim) fim.value = "";
+      const ini = document.getElementById("filtroDataInicioFaturas");
+      const fim = document.getElementById("filtroDataFimFaturas");
+      if (ini) ini.value = "";
+      if (fim) fim.value = "";
 
-    const statusSelect = document.getElementById("filtroStatus");
-    if (statusSelect) statusSelect.value = "";
+      const statusSelect = document.getElementById("filtroStatus");
+      if (statusSelect) statusSelect.value = "";
 
-    document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
+      document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
 
-    dashboardModo = "pendente";
-    if (btnPend && btnPago) {
-      btnPend.classList.add("active");
-      btnPago.classList.remove("active");
-    }
+      dashboardModo = "pendente";
+      if (btnPend && btnPago) {
+        btnPend.classList.add("active");
+        btnPago.classList.remove("active");
+      }
 
-    ativarAba("dashboard");
-    carregarFaturas();
-    carregarHistorico();
-  });
+      ativarAba("dashboard");
+      carregarFaturas();
+      carregarHistorico();
+    });
+  }
 
   document.querySelectorAll(".transportadora-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       filtroTransportadora = btn.dataset.transportadora || "";
-      document
-        .querySelectorAll(".transportadora-btn")
-        .forEach((b) => b.classList.remove("selected"));
+      document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       carregarFaturas();
       carregarHistorico();
@@ -1172,14 +1267,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const ini = document.getElementById("filtroDataInicioFaturas");
   const fim = document.getElementById("filtroDataFimFaturas");
-  if (ini)
-    ini.addEventListener("change", (e) => ((filtroDataInicioFaturas = e.target.value), renderizarFaturas()));
-  if (fim)
-    fim.addEventListener("change", (e) => ((filtroDataFimFaturas = e.target.value), renderizarFaturas()));
+  if (ini) ini.addEventListener("change", (e) => ((filtroDataInicioFaturas = e.target.value), renderizarFaturas()));
+  if (fim) fim.addEventListener("change", (e) => ((filtroDataFimFaturas = e.target.value), renderizarFaturas()));
 
   const statusSelect = document.getElementById("filtroStatus");
-  if (statusSelect)
-    statusSelect.addEventListener("change", (e) => ((filtroStatus = e.target.value), renderizarFaturas()));
+  if (statusSelect) statusSelect.addEventListener("change", (e) => ((filtroStatus = e.target.value), renderizarFaturas()));
 
   const btnAtualizar = document.getElementById("btnAtualizarFaturas");
   if (btnAtualizar) btnAtualizar.addEventListener("click", (e) => (e.preventDefault(), carregarFaturas()));
@@ -1189,23 +1281,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ✅ histórico botões
   const btnAtualizarHistorico = document.getElementById("btnAtualizarHistorico");
-  if (btnAtualizarHistorico)
-    btnAtualizarHistorico.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
+  if (btnAtualizarHistorico) btnAtualizarHistorico.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
 
   const btnExportarHistorico = document.getElementById("btnExportarHistorico");
   if (btnExportarHistorico) btnExportarHistorico.addEventListener("click", exportarHistorico);
 
-  document.getElementById("formFatura").addEventListener("submit", salvarFatura);
+  const formFatura = document.getElementById("formFatura");
+  if (formFatura) formFatura.addEventListener("submit", salvarFatura);
 
-  document.getElementById("modalFechar").addEventListener("click", () =>
-    document.getElementById("modalAnexos").classList.remove("open")
-  );
-  document.getElementById("modalAnexos").addEventListener("click", (e) => {
-    if (e.target.id === "modalAnexos") {
-      document.getElementById("modalAnexos").classList.remove("open");
-    }
-  });
+  const modalFechar = document.getElementById("modalFechar");
+  if (modalFechar)
+    modalFechar.addEventListener("click", () => document.getElementById("modalAnexos").classList.remove("open"));
 
+  const modal = document.getElementById("modalAnexos");
+  if (modal)
+    modal.addEventListener("click", (e) => {
+      if (e.target.id === "modalAnexos") document.getElementById("modalAnexos").classList.remove("open");
+    });
+
+  // ✅ carrega tudo
+  carregarUsuarioLogado(); // perfil (e valida sessão)
   carregarFaturas();
   carregarHistorico();
 });
