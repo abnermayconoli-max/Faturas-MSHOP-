@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Perfil - Faturas MSHOP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{margin:0;font-family:system-ui;background:#0b1220;color:#e5e7eb}
+    .wrap{max-width:980px;margin:0 auto;padding:22px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+    .title{display:flex;flex-direction:column}
+    h1{margin:0;font-size:22px}
+    .muted{margin-top:4px;color:#94a3b8;font-size:13px}
+    .actions{display:flex;gap:10px}
+    a.btn{display:inline-block;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#0f1a2e;color:#e5e7eb;text-decoration:none;font-weight:700}
+    a.btn.primary{background:#1f6feb;border-color:rgba(31,111,235,.55);color:#fff}
+    a.btn:hover{filter:brightness(1.05)}
+    .card{background:#0f1a2e;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;margin-top:14px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .label{color:#94a3b8;font-size:12px}
+    .value{font-weight:700;margin-top:4px}
+    .hr{height:1px;background:rgba(255,255,255,.08);margin:16px 0}
+    h2{margin:0 0 10px;font-size:16px}
+    label{display:block;margin:10px 0 6px;font-size:13px;color:#cbd5e1}
+    input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0b1426;color:#e5e7eb;outline:none}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .submit{margin-top:12px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#1f6feb;color:white;font-weight:800;cursor:pointer}
+    .submit:hover{filter:brightness(1.05)}
+    .note{color:#94a3b8;font-size:12px;margin-top:8px}
+    .adminTag{display:inline-block;font-size:12px;padding:4px 8px;border-radius:999px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.25);color:#86efac;margin-left:8px}
+    .warn{display:inline-block;font-size:12px;padding:4px 8px;border-radius:999px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.25);color:#fcd34d;margin-left:8px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="top">
+      <div class="title">
+        <h1>
+          Perfil
+          {% if is_admin %}<span class="adminTag">ADMIN</span>{% else %}<span class="warn">USER</span>{% endif %}
+        </h1>
+        <div class="muted">Sua conta e configurações do sistema.</div>
+      </div>
+
+      <div class="actions">
+        <a class="btn" href="/">Voltar</a>
+        <a class="btn primary" href="/logout">Sair</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Informações</h2>
+      <div class="grid">
+        <div>
+          <div class="label">Usuário</div>
+          <div class="value">{{ user.username }}</div>
+        </div>
+        <div>
+          <div class="label">E-mail</div>
+          <div class="value">{{ user.email or "-" }}</div>
+        </div>
+        <div>
+          <div class="label">Perfil de acesso</div>
+          <div class="value">{{ user.role or "user" }}</div>
+        </div>
+        <div>
+          <div class="label">Último login</div>
+          <div class="value">{{ user.last_login_at or "-" }}</div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="actions">
+        <a class="btn" href="/change-password">Trocar senha</a>
+      </div>
+      <div class="note">Dica: se você trocar senha e voltar para o login, é normal (sessão pode expirar).</div>
+    </div>
+
+    {% if is_admin %}
+    <div class="card">
+      <h2>Configurações (Admin)</h2>
+      <div class="muted">Aqui você controla usuários e transportadoras.</div>
+
+      <div class="hr"></div>
+
+      <h2>Cadastrar novo usuário</h2>
+      <form method="post" action="/admin/user/create">
+        <input type="hidden" name="csrf" value="{{ csrf }}" />
+        <div class="row">
+          <div>
+            <label>Usuário</label>
+            <input name="username" required />
+          </div>
+          <div>
+            <label>E-mail (opcional)</label>
+            <input name="email" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Tipo</label>
+            <select name="role">
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </div>
+          <div>
+            <label>Senha temporária</label>
+            <input name="temp_password" required />
+          </div>
+        </div>
+        <button class="submit" type="submit">Criar usuário</button>
+        <div class="note">O usuário será obrigado a trocar a senha no primeiro login.</div>
+      </form>
+
+      <div class="hr"></div>
+
+      <h2>Adicionar transportadora</h2>
+      <form method="post" action="/admin/transportadora/create">
+        <input type="hidden" name="csrf" value="{{ csrf }}" />
+        <label>Nome da transportadora</label>
+        <input name="nome" required />
+        <button class="submit" type="submit">Adicionar transportadora</button>
+      </form>
+
+      <div class="hr"></div>
+
+      <h2>Alterar responsável da transportadora</h2>
+      <form method="post" action="/admin/transportadora/assign">
+        <input type="hidden" name="csrf" value="{{ csrf }}" />
+
+        <div class="row">
+          <div>
+            <label>Transportadora</label>
+            <select name="transportadora_id" required>
+              {% for tr in trs %}
+                <option value="{{ tr.id }}">{{ tr.nome }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div>
+            <label>Responsável (usuário)</label>
+            <select name="responsavel_user_id">
+              <option value="">(sem responsável)</option>
+              {% for u in users %}
+                <option value="{{ u.id }}">{{ u.username }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <button class="submit" type="submit">Salvar responsável</button>
+        <div class="note">Isso afeta quem aparece como responsável na listagem/exportação.</div>
+      </form>
+    </div>
+    {% endif %}
+
+  </div>
+</body>
+</html>
