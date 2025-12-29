@@ -660,57 +660,41 @@ def on_startup():
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/"):
-    csrf_cookie = request.cookies.get(CSRF_COOKIE)
-    csrf = csrf_cookie or make_csrf_token()
-
-    resp = templates.TemplateResponse("login.html", {"request": request, "csrf": csrf, "next": next})
-    if not csrf_cookie:
-        resp.set_cookie(
-            CSRF_COOKIE,
-            csrf,
-            max_age=CSRF_MAX_AGE_SECONDS,
-            httponly=False,
-            secure=True,
-            samesite="lax",
-            path="/",
-        )
-    return resp
+    """
+    ✅ ALTERAÇÃO: No Render Free, o cookie CSRF pode não estar setado ainda no primeiro acesso,
+    causando 400 no POST /login.
+    Então aqui a gente SÓ renderiza a página.
+    O CSRF "real" será criado junto com a sessão APÓS login (set_auth_cookies).
+    """
+    csrf_fake = make_csrf_token()  # só para o template (não valida no login)
+    return templates.TemplateResponse("login.html", {"request": request, "csrf": csrf_fake, "next": next})
 
 @app.post("/login", response_class=HTMLResponse)
 def login_action(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    csrf: Optional[str] = Form(None),
+    csrf: Optional[str] = Form(None),  # mantém pro template, mas NÃO valida no login
     next: str = Form("/"),
     db: Session = Depends(get_db),
 ):
-    if not validate_csrf(request, csrf):
-        csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
-        resp = templates.TemplateResponse(
-            "login.html",
-            {"request": request, "csrf": csrf_cookie, "next": next, "error": "Sessão expirada. Recarregue a página e tente novamente."},
-            status_code=400,
-        )
-        if not request.cookies.get(CSRF_COOKIE):
-            resp.set_cookie(CSRF_COOKIE, csrf_cookie, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
-        return resp
-
+    """
+    ✅ ALTERAÇÃO: Login NÃO valida CSRF.
+    CSRF continua obrigatório em todas as outras rotas sensíveis (admin, change, forgot, reset etc.).
+    """
     user = db.query(UserDB).filter(UserDB.username == username.strip()).first()
     if not user or not verify_password(password, getattr(user, "pwd_salt", None), getattr(user, "pwd_hash", None)):
-        csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
-        resp = templates.TemplateResponse(
+        # Re-renderiza login com erro (sem CSRF obrigatório)
+        return templates.TemplateResponse(
             "login.html",
-            {"request": request, "csrf": csrf_cookie, "next": next, "error": "Usuário ou senha inválidos."},
+            {"request": request, "csrf": make_csrf_token(), "next": next, "error": "Usuário ou senha inválidos."},
             status_code=401,
         )
-        if not request.cookies.get(CSRF_COOKIE):
-            resp.set_cookie(CSRF_COOKIE, csrf_cookie, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
-        return resp
 
     user.last_login_at = agora_br()
     db.commit()
 
+    # cria sessão e CSRF "real" aqui
     if needs_password_change(user):
         resp = RedirectResponse(url="/change-password", status_code=302)
         set_auth_cookies(resp, user.id)
