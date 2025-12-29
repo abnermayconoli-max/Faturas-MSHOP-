@@ -9,6 +9,9 @@ import secrets
 import traceback
 from typing import List, Optional, Tuple
 
+raise RuntimeError("🔥 ESTE É O MAIN CERTO 🔥")
+
+
 from zoneinfo import ZoneInfo
 
 from fastapi import (
@@ -46,6 +49,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base, Session, relationship
 import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
+
 
 
 # =========================
