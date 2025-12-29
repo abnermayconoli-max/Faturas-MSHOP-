@@ -1,8 +1,11 @@
 from datetime import date, datetime, timedelta
 import os
 import uuid
-import secrets
+import base64
+import json
+import hmac
 import hashlib
+import secrets
 from typing import List, Optional, Tuple
 
 from zoneinfo import ZoneInfo  # ✅ fuso
@@ -30,7 +33,6 @@ from sqlalchemy import (
     String,
     Date,
     DateTime,
-    Boolean,
     Numeric,
     ForeignKey,
     func,
@@ -44,9 +46,6 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 
-from passlib.hash import argon2
-from jose import jwt, JWTError
-
 # =========================
 # CONFIG BANCO
 # =========================
@@ -58,6 +57,36 @@ if not DATABASE_URL:
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# =========================
+# CONFIG AUTH / SEGURANÇA
+# =========================
+
+# Cookie de sessão assinado (HMAC) + CSRF por cookie
+SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("JWT_SECRET")
+if not SESSION_SECRET:
+    # ✅ não derruba o app com RuntimeError (pra você não ficar travado no Render)
+    # mas recomenda MUITO setar no Render
+    print("WARN: SESSION_SECRET/JWT_SECRET não configurado. Configure no Render para login funcionar com segurança.")
+    SESSION_SECRET = "DEV_ONLY_CHANGE_ME"
+
+COOKIE_NAME = "mshop_session"
+CSRF_COOKIE = "mshop_csrf"
+COOKIE_MAX_AGE_SECONDS = 60 * 60 * 12  # 12 horas
+CSRF_MAX_AGE_SECONDS = 60 * 60 * 12
+
+# Senha: PBKDF2 (stdlib)
+PBKDF2_ITERS = int(os.getenv("PBKDF2_ITERS", "260000"))
+HASH_ALGO = "sha256"
+
+# Expiração de senha
+PWD_EXP_FIRST_DAYS = 90
+PWD_EXP_NEXT_DAYS = 180
+
+# Bootstrap do primeiro admin via env
+BOOTSTRAP_ADMIN_USER = os.getenv("BOOTSTRAP_ADMIN_USER", "").strip()
+BOOTSTRAP_ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
+BOOTSTRAP_ADMIN_EMAIL = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip() or None
 
 # =========================
 # CONFIG R2
@@ -103,75 +132,7 @@ def hoje_local_br() -> date:
     return agora_br().date()
 
 # =========================
-# 🔐 AUTH / SECURITY CONFIG
-# =========================
-
-JWT_SECRET = os.getenv("JWT_SECRET")
-if not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET não configurado nas variáveis de ambiente do Render.")
-
-SESSION_COOKIE_NAME = "mshop_session"
-CSRF_COOKIE_NAME = "mshop_csrf"
-
-# Troca de senha:
-# - primeira troca: 3 meses
-# - demais trocas: 6 meses
-PWD_MAX_FIRST_DAYS = 90
-PWD_MAX_NEXT_DAYS = 180
-
-SESSION_EXPIRE_HOURS = 12  # sessão padrão (relogin depois)
-RESET_TOKEN_MINUTES = 30   # link de reset (sem e-mail por enquanto)
-
-def _jwt_encode(payload: dict, exp_seconds: int) -> str:
-    data = dict(payload)
-    data["exp"] = datetime.utcnow() + timedelta(seconds=exp_seconds)
-    return jwt.encode(data, JWT_SECRET, algorithm="HS256")
-
-def _jwt_decode(token: str) -> dict:
-    return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-
-def _make_csrf() -> str:
-    return secrets.token_urlsafe(32)
-
-def _hash_csrf(csrf: str) -> str:
-    # hash leve para não ficar carregando token bruto em logs
-    return hashlib.sha256(csrf.encode("utf-8")).hexdigest()
-
-def _set_csrf_cookie(resp: Response, csrf: str):
-    # CSRF cookie: pode ser não-HttpOnly para double-submit, mas aqui usamos hidden field + cookie
-    # e comparamos os dois. Isso evita CSRF em forms.
-    resp.set_cookie(
-        key=CSRF_COOKIE_NAME,
-        value=csrf,
-        httponly=False,
-        secure=True,
-        samesite="lax",
-        path="/",
-        max_age=60 * 60 * 24,  # 1 dia
-    )
-
-def _clear_auth_cookies(resp: Response):
-    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
-    resp.delete_cookie(CSRF_COOKIE_NAME, path="/")
-
-def _set_session_cookie(resp: Response, token: str):
-    resp.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-        max_age=60 * 60 * SESSION_EXPIRE_HOURS,
-    )
-
-def verify_csrf(request: Request, form_csrf: str):
-    cookie_csrf = request.cookies.get(CSRF_COOKIE_NAME) or ""
-    if not form_csrf or not cookie_csrf or form_csrf != cookie_csrf:
-        raise HTTPException(status_code=400, detail="CSRF inválido.")
-
-# =========================
-# MODELOS
+# MODELOS FATURAS
 # =========================
 
 class FaturaDB(Base):
@@ -220,31 +181,49 @@ class HistoricoPagamentoDB(Base):
     valor = Column(Numeric(10, 2), nullable=False)
     data_vencimento = Column(Date, nullable=False)
 
-# 🔐 NOVO: Users / Transportadoras (Admin)
+# =========================
+# MODELOS AUTH / ADMIN
+# =========================
+
 class UserDB(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, nullable=False, index=True)
-    email = Column(String, nullable=True)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False, default="user")  # user | admin
-    is_active = Column(Boolean, nullable=False, default=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=False, index=False, nullable=True)
 
-    must_change_password = Column(Boolean, nullable=False, default=True)
-    password_changed_at = Column(DateTime(timezone=True), nullable=True)
-    password_version = Column(Integer, nullable=False, default=0)  # conta trocas
+    role = Column(String, default="user")  # "admin" | "user"
 
-    created_at = Column(DateTime(timezone=True), nullable=False, default=agora_br)
+    pwd_salt = Column(String, nullable=False)
+    pwd_hash = Column(String, nullable=False)
+
+    must_change_password = Column(Integer, default=1)  # 1/0
+    first_password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    last_password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    password_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=agora_br)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
 class TransportadoraDB(Base):
     __tablename__ = "transportadoras"
 
     id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, unique=True, nullable=False, index=True)
-    responsavel_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    nome = Column(String, unique=True, index=True, nullable=False)
 
+    responsavel_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    responsavel = relationship("UserDB", foreign_keys=[responsavel_user_id])
+
+class PasswordResetDB(Base):
+    __tablename__ = "password_resets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(String, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+# cria tabelas (básico)
 Base.metadata.create_all(bind=engine)
 
 # =========================
@@ -252,12 +231,6 @@ Base.metadata.create_all(bind=engine)
 # =========================
 
 def ensure_schema():
-    """
-    - garante TIMESTAMPTZ nas datas de pagamento
-    - cria tabela de histórico
-    - cria tabelas users/transportadoras se não existirem
-    - adiciona colunas novas caso já exista (sem quebrar)
-    """
     with engine.begin() as conn:
         # --- faturas.data_pagamento ---
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMPTZ;"))
@@ -299,40 +272,200 @@ def ensure_schema():
                 id SERIAL PRIMARY KEY,
                 username TEXT UNIQUE NOT NULL,
                 email TEXT,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'user',
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                password_changed_at TIMESTAMPTZ,
-                must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
-                password_version INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                role TEXT DEFAULT 'user',
+                pwd_salt TEXT NOT NULL,
+                pwd_hash TEXT NOT NULL,
+                must_change_password INTEGER DEFAULT 1,
+                first_password_changed_at TIMESTAMPTZ,
+                last_password_changed_at TIMESTAMPTZ,
+                password_expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
                 last_login_at TIMESTAMPTZ
             );
         """))
-        # adiciona colunas se banco já era antigo
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version INTEGER NOT NULL DEFAULT 0;"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_username ON users(username);"))
 
         # --- transportadoras ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS transportadoras (
                 id SERIAL PRIMARY KEY,
                 nome TEXT UNIQUE NOT NULL,
-                responsavel_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                responsavel_user_id INTEGER REFERENCES users(id)
             );
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transportadoras_nome ON transportadoras(nome);"))
 
+        # --- password_resets ---
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                used_at TIMESTAMPTZ
+            );
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_password_resets_token_hash ON password_resets(token_hash);"))
+
 ensure_schema()
 
 # =========================
-# Pydantic
+# RESPONSÁVEL (fallback antigo)
+# =========================
+
+RESP_MAP = {
+    "DHL": "Gabrielly",
+    "Pannan": "Gabrielly",
+    "Garcia": "Juliana",
+    "Excargo": "Juliana",
+    "Transbritto": "Larissa",
+    "PDA": "Larissa",
+    "GLM": "Larissa",
+}
+
+def get_responsavel_fallback(transportadora: str) -> Optional[str]:
+    if transportadora in RESP_MAP:
+        return RESP_MAP[transportadora]
+    base = transportadora.split("-")[0].strip()
+    return RESP_MAP.get(base)
+
+# =========================
+# AUTH HELPERS
+# =========================
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
+
+def sign_data(payload: dict, secret: str) -> str:
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()
+    return f"{_b64url(raw)}.{_b64url(sig)}"
+
+def verify_signed(token: str, secret: str) -> Optional[dict]:
+    try:
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        raw = _b64url_decode(parts[0])
+        sig = _b64url_decode(parts[1])
+        exp_sig = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, exp_sig):
+            return None
+        payload = json.loads(raw.decode("utf-8"))
+        return payload
+    except Exception:
+        return None
+
+def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
+    if salt is None:
+        salt_bytes = secrets.token_bytes(16)
+        salt = _b64url(salt_bytes)
+    else:
+        salt_bytes = _b64url_decode(salt)
+
+    dk = hashlib.pbkdf2_hmac(
+        HASH_ALGO,
+        password.encode("utf-8"),
+        salt_bytes,
+        PBKDF2_ITERS,
+    )
+    return salt, _b64url(dk)
+
+def verify_password(password: str, salt: str, pwd_hash: str) -> bool:
+    _, calc = hash_password(password, salt=salt)
+    return hmac.compare_digest(calc, pwd_hash)
+
+def compute_expiry(is_first_after_temp: bool) -> datetime:
+    days = PWD_EXP_FIRST_DAYS if is_first_after_temp else PWD_EXP_NEXT_DAYS
+    return agora_br() + timedelta(days=days)
+
+def needs_password_change(user: UserDB) -> bool:
+    if user.must_change_password:
+        return True
+    if user.password_expires_at and agora_br() > user.password_expires_at:
+        return True
+    return False
+
+def make_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+def set_auth_cookies(resp: Response, user_id: int):
+    now = agora_br()
+    csrf = make_csrf_token()
+
+    session_payload = {
+        "uid": user_id,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=COOKIE_MAX_AGE_SECONDS)).timestamp()),
+        "csrf": csrf,
+    }
+    sess = sign_data(session_payload, SESSION_SECRET)
+
+    resp.set_cookie(
+        COOKIE_NAME,
+        sess,
+        max_age=COOKIE_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=True,      # ✅ HTTPS only (Render)
+        samesite="lax",
+        path="/",
+    )
+    resp.set_cookie(
+        CSRF_COOKIE,
+        csrf,
+        max_age=CSRF_MAX_AGE_SECONDS,
+        httponly=False,   # ✅ precisa ler no template/form
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+
+def clear_auth_cookies(resp: Response):
+    resp.delete_cookie(COOKIE_NAME, path="/")
+    resp.delete_cookie(CSRF_COOKIE, path="/")
+
+def get_current_user(request: Request, db: Session) -> Optional[UserDB]:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    payload = verify_signed(token, SESSION_SECRET)
+    if not payload:
+        return None
+    exp = payload.get("exp")
+    uid = payload.get("uid")
+    if not exp or not uid:
+        return None
+    if int(exp) < int(agora_br().timestamp()):
+        return None
+
+    user = db.query(UserDB).filter(UserDB.id == int(uid)).first()
+    return user
+
+def get_session_csrf(request: Request) -> Optional[str]:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    payload = verify_signed(token, SESSION_SECRET)
+    if not payload:
+        return None
+    return payload.get("csrf")
+
+def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
+    # ✅ evita 422: trata aqui
+    if not csrf_form_value:
+        return False
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf_session = get_session_csrf(request)
+    if not csrf_cookie or not csrf_session:
+        return False
+    return hmac.compare_digest(csrf_form_value, csrf_cookie) and hmac.compare_digest(csrf_form_value, csrf_session)
+
+# =========================
+# Pydantic (Faturas)
 # =========================
 
 class FaturaBase(BaseModel):
@@ -383,39 +516,22 @@ class HistoricoPagamentoOut(BaseModel):
         from_attributes = True
 
 # =========================
-# RESPONSÁVEL (fallback antigo)
+# HELPERS FATURAS
 # =========================
 
-RESP_MAP = {
-    "DHL": "Gabrielly",
-    "Pannan": "Gabrielly",
-    "Garcia": "Juliana",
-    "Excargo": "Juliana",
-    "Transbritto": "Larissa",
-    "PDA": "Larissa",
-    "GLM": "Larissa",
-}
-
-def get_responsavel_from_db(db: Session, transportadora: str) -> Optional[str]:
-    if not transportadora:
-        return None
-    tr = db.query(TransportadoraDB).filter(func.lower(TransportadoraDB.nome) == transportadora.lower()).first()
-    if not tr or not tr.responsavel_user_id:
-        return None
-    u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
-    if not u:
-        return None
-    return u.username
-
-def get_responsavel_fallback(transportadora: str) -> Optional[str]:
-    if transportadora in RESP_MAP:
-        return RESP_MAP[transportadora]
-    base = transportadora.split("-")[0].strip()
-    return RESP_MAP.get(base)
+def get_responsavel(db: Session, transportadora: str) -> Optional[str]:
+    # ✅ primeiro tenta ADMIN (tabela transportadoras)
+    if transportadora:
+        nome_base = transportadora.split("-")[0].strip()
+        tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
+        if tr and tr.responsavel_user_id:
+            u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
+            if u:
+                return u.username
+    # fallback antigo
+    return get_responsavel_fallback(transportadora)
 
 def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
-    resp_db = get_responsavel_from_db(db, f.transportadora)
-    resp = resp_db or get_responsavel_fallback(f.transportadora)
     return FaturaOut(
         id=f.id,
         transportadora=f.transportadora,
@@ -424,7 +540,7 @@ def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
         data_vencimento=f.data_vencimento,
         status=f.status,
         observacao=f.observacao,
-        responsavel=resp,
+        responsavel=get_responsavel(db, f.transportadora),
         data_pagamento=f.data_pagamento,
     )
 
@@ -454,19 +570,15 @@ def atualizar_status_automatico(db: Session):
 # ✅ HISTÓRICO DE PAGAMENTO
 # =========================
 
-def registrar_pagamento(db: Session, fatura: FaturaDB):
+def registrar_pagamento(db: Session, fatura: FaturaDB, responsavel_nome: Optional[str]):
     pago_em = agora_br()
     fatura.data_pagamento = pago_em
-
-    # responsável via DB ou fallback
-    resp_db = get_responsavel_from_db(db, fatura.transportadora)
-    resp = resp_db or get_responsavel_fallback(fatura.transportadora)
 
     hist = HistoricoPagamentoDB(
         fatura_id=fatura.id,
         pago_em=pago_em,
         transportadora=fatura.transportadora,
-        responsavel=resp,
+        responsavel=responsavel_nome,
         numero_fatura=fatura.numero_fatura,
         valor=fatura.valor or 0,
         data_vencimento=fatura.data_vencimento,
@@ -488,512 +600,471 @@ def get_db():
         db.close()
 
 # =========================
-# 🔐 AUTH HELPERS (DB)
-# =========================
-
-def _pwd_is_expired(u: UserDB) -> bool:
-    if u.must_change_password:
-        return True
-    if not u.password_changed_at:
-        return True
-
-    # 1ª troca = version == 1 => validade 90 dias
-    # trocas seguintes => validade 180 dias
-    if (u.password_version or 0) <= 1:
-        max_days = PWD_MAX_FIRST_DAYS
-    else:
-        max_days = PWD_MAX_NEXT_DAYS
-
-    return (agora_br() - u.password_changed_at) > timedelta(days=max_days)
-
-def authenticate_user(db: Session, username: str, password: str) -> Optional[UserDB]:
-    if not username or not password:
-        return None
-    u = db.query(UserDB).filter(func.lower(UserDB.username) == username.lower()).first()
-    if not u or not u.is_active:
-        return None
-    try:
-        if not argon2.verify(password, u.password_hash):
-            return None
-    except Exception:
-        return None
-    return u
-
-def require_user(request: Request, db: Session) -> UserDB:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        raise HTTPException(status_code=401, detail="Não autenticado.")
-    try:
-        payload = _jwt_decode(token)
-        uid = int(payload.get("uid"))
-    except Exception:
-        raise HTTPException(status_code=401, detail="Sessão inválida.")
-    u = db.query(UserDB).filter(UserDB.id == uid).first()
-    if not u or not u.is_active:
-        raise HTTPException(status_code=401, detail="Usuário inválido.")
-    return u
-
-def require_admin(user: UserDB) -> None:
-    if (user.role or "").lower() != "admin":
-        raise HTTPException(status_code=403, detail="Acesso negado.")
-
-def _redirect_to_login(next_path: str = "/") -> RedirectResponse:
-    return RedirectResponse(url=f"/login?next={next_path}", status_code=303)
-
-# =========================
-# ✅ BOOTSTRAP ADMIN (ENV)
-# =========================
-
-def bootstrap_admin_if_needed():
-    """
-    Cria o PRIMEIRO admin automaticamente usando:
-      BOOTSTRAP_ADMIN_USER
-      BOOTSTRAP_ADMIN_PASSWORD
-    Só roda se NÃO existir nenhum usuário no banco.
-    """
-    admin_user = (os.getenv("BOOTSTRAP_ADMIN_USER") or "").strip()
-    admin_pass = (os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
-
-    if not admin_user or not admin_pass:
-        # sem env, não cria nada
-        return
-
-    db = SessionLocal()
-    try:
-        total = db.query(UserDB).count()
-        if total > 0:
-            return
-
-        # cria admin
-        pwd_hash = argon2.hash(admin_pass)
-        u = UserDB(
-            username=admin_user,
-            email=None,
-            password_hash=pwd_hash,
-            role="admin",
-            is_active=True,
-            must_change_password=True,  # força troca no 1º login
-            password_changed_at=None,
-            password_version=0,
-            created_at=agora_br(),
-        )
-        db.add(u)
-        db.commit()
-        print("✅ BOOTSTRAP ADMIN criado:", admin_user)
-    except Exception as e:
-        print("ERRO BOOTSTRAP ADMIN:", repr(e))
-    finally:
-        db.close()
-
-# =========================
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="1.0.0")
+app = FastAPI(title="Sistema de Faturas", version="2.0.0")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# =========================
+# BOOTSTRAP ADMIN (ENV)
+# =========================
+
+def bootstrap_admin(db: Session):
+    if not BOOTSTRAP_ADMIN_USER or not BOOTSTRAP_ADMIN_PASSWORD:
+        return
+
+    existing = db.query(UserDB).filter(UserDB.username == BOOTSTRAP_ADMIN_USER).first()
+    if existing:
+        return
+
+    salt, pwd_hash = hash_password(BOOTSTRAP_ADMIN_PASSWORD)
+    user = UserDB(
+        username=BOOTSTRAP_ADMIN_USER,
+        email=BOOTSTRAP_ADMIN_EMAIL,
+        role="admin",
+        pwd_salt=salt,
+        pwd_hash=pwd_hash,
+        must_change_password=1,  # força trocar no primeiro login
+        password_expires_at=agora_br(),  # expira imediatamente
+        created_at=agora_br(),
+    )
+    db.add(user)
+    db.commit()
+    print(f"BOOTSTRAP: admin criado: {BOOTSTRAP_ADMIN_USER}")
+
 @app.on_event("startup")
-def _startup():
-    ensure_schema()
-    bootstrap_admin_if_needed()
-
-# =========================
-# 🔒 MIDDLEWARE: exige login
-# =========================
-
-PUBLIC_PATHS_PREFIX = (
-    "/static",
-)
-
-PUBLIC_EXACT = (
-    "/health",
-    "/login",
-    "/logout",
-    "/forgot",
-    "/change-password",
-)
-
-PUBLIC_STARTS = (
-    "/reset",  # /reset?token=...
-)
-
-@app.middleware("http")
-async def auth_gate(request: Request, call_next):
-    path = request.url.path
-
-    if path.startswith(PUBLIC_PATHS_PREFIX):
-        return await call_next(request)
-
-    if path in PUBLIC_EXACT or path.startswith(PUBLIC_STARTS):
-        return await call_next(request)
-
-    # Tudo que não for público exige sessão válida
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        return _redirect_to_login(next_path=path)
-
+def on_startup():
+    db = SessionLocal()
     try:
-        _ = _jwt_decode(token)
-    except Exception:
-        resp = _redirect_to_login(next_path=path)
-        _clear_auth_cookies(resp)
-        return resp
-
-    return await call_next(request)
+        bootstrap_admin(db)
+    finally:
+        db.close()
 
 # =========================
-# HOME (protegida)
-# =========================
-
-@app.get("/", response_class=HTMLResponse)
-def home(request: Request, db: Session = Depends(get_db)):
-    u = require_user(request, db)
-    # se senha expirada, força troca
-    if _pwd_is_expired(u):
-        return RedirectResponse("/change-password", status_code=303)
-
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
-# =========================
-# 🔐 LOGIN / LOGOUT / CHANGE / FORGOT / RESET
+# AUTH ROUTES / PAGES
 # =========================
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/"):
-    csrf = _make_csrf()
+    # csrf = cookie ou gera um se não tiver
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
     resp = templates.TemplateResponse("login.html", {"request": request, "csrf": csrf, "next": next})
-    _set_csrf_cookie(resp, csrf)
+    if not csrf_cookie:
+        resp.set_cookie(
+            CSRF_COOKIE,
+            csrf,
+            max_age=CSRF_MAX_AGE_SECONDS,
+            httponly=False,
+            secure=True,
+            samesite="lax",
+            path="/",
+        )
     return resp
 
 @app.post("/login", response_class=HTMLResponse)
-def login_post(
+def login_action(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    csrf: str = Form(...),
+    csrf: Optional[str] = Form(None),
     next: str = Form("/"),
     db: Session = Depends(get_db),
 ):
-    verify_csrf(request, csrf)
-
-    u = authenticate_user(db, username, password)
-    if not u:
-        csrf2 = _make_csrf()
+    if not validate_csrf(request, csrf):
+        # volta pra tela com mensagem (sem 422)
+        csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
         resp = templates.TemplateResponse(
             "login.html",
-            {"request": request, "csrf": csrf2, "next": next, "error": "Usuário ou senha inválidos."},
+            {"request": request, "csrf": csrf_cookie, "next": next, "error": "Sessão expirada. Recarregue a página e tente novamente."},
+            status_code=400,
+        )
+        if not request.cookies.get(CSRF_COOKIE):
+            resp.set_cookie(CSRF_COOKIE, csrf_cookie, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
+        return resp
+
+    user = db.query(UserDB).filter(UserDB.username == username.strip()).first()
+    if not user or not verify_password(password, user.pwd_salt, user.pwd_hash):
+        csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
+        resp = templates.TemplateResponse(
+            "login.html",
+            {"request": request, "csrf": csrf_cookie, "next": next, "error": "Usuário ou senha inválidos."},
             status_code=401,
         )
-        _set_csrf_cookie(resp, csrf2)
+        if not request.cookies.get(CSRF_COOKIE):
+            resp.set_cookie(CSRF_COOKIE, csrf_cookie, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
         return resp
 
-    u.last_login_at = agora_br()
+    user.last_login_at = agora_br()
     db.commit()
 
-    # se precisa trocar senha
-    if _pwd_is_expired(u):
-        token = _jwt_encode({"uid": u.id, "role": u.role, "pv": u.password_version}, 60 * 60 * SESSION_EXPIRE_HOURS)
-        resp = RedirectResponse("/change-password", status_code=303)
-        _set_session_cookie(resp, token)
-        csrf2 = _make_csrf()
-        _set_csrf_cookie(resp, csrf2)
+    # Se precisa trocar senha: manda para change-password
+    if needs_password_change(user):
+        resp = RedirectResponse(url="/change-password", status_code=302)
+        set_auth_cookies(resp, user.id)
         return resp
 
-    # login ok
-    token = _jwt_encode({"uid": u.id, "role": u.role, "pv": u.password_version}, 60 * 60 * SESSION_EXPIRE_HOURS)
-    resp = RedirectResponse(next or "/", status_code=303)
-    _set_session_cookie(resp, token)
-    csrf2 = _make_csrf()
-    _set_csrf_cookie(resp, csrf2)
+    # normal
+    # Se clicar "Admin" no login.html, ele manda next=/admin. Só vai funcionar se role=admin
+    resp = RedirectResponse(url=next or "/", status_code=302)
+    set_auth_cookies(resp, user.id)
     return resp
 
 @app.get("/logout")
 def logout():
-    resp = RedirectResponse("/login", status_code=303)
-    _clear_auth_cookies(resp)
+    resp = RedirectResponse(url="/login", status_code=302)
+    clear_auth_cookies(resp)
     return resp
+
+def require_login(request: Request, db: Session) -> UserDB:
+    u = get_current_user(request, db)
+    if not u:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    # força troca se necessário
+    if needs_password_change(u) and request.url.path not in ["/change-password", "/logout"]:
+        raise HTTPException(status_code=403, detail="Troca de senha necessária")
+    return u
+
+def require_admin(request: Request, db: Session) -> UserDB:
+    u = require_login(request, db)
+    if (u.role or "").lower() != "admin":
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    return u
 
 @app.get("/change-password", response_class=HTMLResponse)
 def change_password_page(request: Request, db: Session = Depends(get_db)):
-    u = require_user(request, db)
-    csrf = _make_csrf()
-    resp = templates.TemplateResponse("change.html", {"request": request, "csrf": csrf, "user": u.username})
-    _set_csrf_cookie(resp, csrf)
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login?next=/change-password", status_code=302)
+
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    resp = templates.TemplateResponse("change.html", {"request": request, "csrf": csrf})
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
     return resp
 
 @app.post("/change-password", response_class=HTMLResponse)
-def change_password_post(
+def change_password_action(
     request: Request,
     current_password: str = Form(...),
     new_password: str = Form(...),
-    csrf: str = Form(...),
+    csrf: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    verify_csrf(request, csrf)
-    u = require_user(request, db)
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login?next=/change-password", status_code=302)
 
-    # valida senha atual
-    ok = False
-    try:
-        ok = argon2.verify(current_password, u.password_hash)
-    except Exception:
-        ok = False
-
-    if not ok:
-        csrf2 = _make_csrf()
-        resp = templates.TemplateResponse(
+    if not validate_csrf(request, csrf):
+        return templates.TemplateResponse(
             "change.html",
-            {"request": request, "csrf": csrf2, "error": "Senha atual inválida."},
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "error": "Sessão expirada. Recarregue a página e tente novamente."},
             status_code=400,
         )
-        _set_csrf_cookie(resp, csrf2)
-        return resp
 
-    # regra mínima simples (você pode endurecer depois)
+    if not verify_password(current_password, user.pwd_salt, user.pwd_hash):
+        return templates.TemplateResponse(
+            "change.html",
+            {"request": request, "csrf": csrf, "error": "Senha atual incorreta."},
+            status_code=400,
+        )
+
+    # regras mínimas de senha (pode reforçar depois)
     if len(new_password) < 8:
-        csrf2 = _make_csrf()
-        resp = templates.TemplateResponse(
+        return templates.TemplateResponse(
             "change.html",
-            {"request": request, "csrf": csrf2, "error": "A nova senha deve ter pelo menos 8 caracteres."},
+            {"request": request, "csrf": csrf, "error": "A nova senha deve ter pelo menos 8 caracteres."},
             status_code=400,
         )
-        _set_csrf_cookie(resp, csrf2)
-        return resp
 
-    # atualiza senha
-    u.password_hash = argon2.hash(new_password)
-    u.must_change_password = False
-    u.password_changed_at = agora_br()
-    u.password_version = int(u.password_version or 0) + 1
+    # troca
+    salt, pwd_hash = hash_password(new_password)
+    user.pwd_salt = salt
+    user.pwd_hash = pwd_hash
+
+    # primeira troca após temp?
+    is_first = user.first_password_changed_at is None
+    now = agora_br()
+
+    if is_first:
+        user.first_password_changed_at = now
+
+    user.last_password_changed_at = now
+    user.must_change_password = 0
+    user.password_expires_at = compute_expiry(is_first_after_temp=is_first)
+
     db.commit()
 
-    # reemite token com versão nova
-    token = _jwt_encode({"uid": u.id, "role": u.role, "pv": u.password_version}, 60 * 60 * SESSION_EXPIRE_HOURS)
-    resp = RedirectResponse("/", status_code=303)
-    _set_session_cookie(resp, token)
-
-    csrf2 = _make_csrf()
-    _set_csrf_cookie(resp, csrf2)
-    return resp
+    return RedirectResponse(url="/", status_code=302)
 
 @app.get("/forgot", response_class=HTMLResponse)
 def forgot_page(request: Request):
-    csrf = _make_csrf()
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
     resp = templates.TemplateResponse("forgot.html", {"request": request, "csrf": csrf})
-    _set_csrf_cookie(resp, csrf)
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
     return resp
 
 @app.post("/forgot", response_class=HTMLResponse)
-def forgot_post(
+def forgot_action(
     request: Request,
     username_or_email: str = Form(...),
-    csrf: str = Form(...),
+    csrf: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    verify_csrf(request, csrf)
-
-    q = db.query(UserDB)
-    val = (username_or_email or "").strip()
-    u = q.filter(or_(func.lower(UserDB.username) == val.lower(), func.lower(UserDB.email) == val.lower())).first()
-
-    csrf2 = _make_csrf()
-
-    if not u or not u.is_active:
-        # não revela se usuário existe
-        resp = templates.TemplateResponse(
+    if not validate_csrf(request, csrf):
+        return templates.TemplateResponse(
             "forgot.html",
-            {"request": request, "csrf": csrf2, "msg": "Se o usuário existir, um link será gerado."},
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "msg": "Sessão expirada. Recarregue e tente novamente."},
+            status_code=400,
         )
-        _set_csrf_cookie(resp, csrf2)
-        return resp
 
-    token = _jwt_encode({"uid": u.id, "purpose": "reset"}, 60 * RESET_TOKEN_MINUTES)
-    reset_link = f"/reset?token={token}"
+    val = username_or_email.strip()
+    user = db.query(UserDB).filter(UserDB.username == val).first()
+    if not user and val:
+        user = db.query(UserDB).filter(UserDB.email == val).first()
 
-    resp = templates.TemplateResponse(
-        "forgot.html",
-        {"request": request, "csrf": csrf2, "msg": "Link gerado com sucesso.", "reset_link": reset_link},
+    # sempre responde “ok” pra não vazar usuários
+    if not user:
+        return templates.TemplateResponse(
+            "forgot.html",
+            {"request": request, "csrf": csrf, "msg": "Se existir, um link de redefinição foi gerado."},
+        )
+
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    reset = PasswordResetDB(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=agora_br() + timedelta(minutes=30),
+        used_at=None,
     )
-    _set_csrf_cookie(resp, csrf2)
-    return resp
-
-def _render_reset_html(error: Optional[str] = None, token: str = "") -> HTMLResponse:
-    # como você não mandou reset.html, deixei embutido (não quebra o sistema)
-    err_html = f'<div style="margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25)">{error}</div>' if error else ""
-    html = f"""<!DOCTYPE html>
-<html lang="pt-BR"><head>
-<meta charset="UTF-8" />
-<title>Reset de senha - Faturas MSHOP</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-body{{margin:0;font-family:system-ui;background:#0b1220;color:#e5e7eb;min-height:100vh;display:grid;place-items:center}}
-.card{{width:100%;max-width:520px;background:#0f1a2e;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.35)}}
-h1{{margin:0 0 6px;font-size:22px}}
-.muted{{color:#94a3b8;font-size:13px;margin:0 0 12px}}
-label{{display:block;margin:12px 0 6px;font-size:13px;color:#cbd5e1}}
-input{{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0b1426;color:#e5e7eb;outline:none}}
-.btn{{margin-top:14px;width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#1f6feb;color:white;font-weight:700;cursor:pointer}}
-.btn:hover{{filter:brightness(1.05)}}
-a{{color:#93c5fd;text-decoration:none}} a:hover{{text-decoration:underline}}
-</style></head>
-<body><div class="card">
-<h1>Reset de senha</h1>
-<p class="muted">Defina uma nova senha para sua conta.</p>
-{err_html}
-<form method="post" action="/reset">
-  <input type="hidden" name="token" value="{token}"/>
-  <label>Nova senha</label>
-  <input name="new_password" type="password" autocomplete="new-password" required />
-  <button class="btn" type="submit">Atualizar</button>
-</form>
-<p style="margin-top:14px;"><a href="/login">Voltar ao login</a></p>
-</div></body></html>"""
-    return HTMLResponse(content=html)
-
-@app.get("/reset", response_class=HTMLResponse)
-def reset_page(token: str):
-    # valida token
-    try:
-        payload = _jwt_decode(token)
-        if payload.get("purpose") != "reset":
-            return _render_reset_html("Token inválido.", token=token)
-    except Exception:
-        return _render_reset_html("Token expirado ou inválido.", token=token)
-    return _render_reset_html(None, token=token)
-
-@app.post("/reset", response_class=HTMLResponse)
-def reset_post(token: str = Form(...), new_password: str = Form(...), db: Session = Depends(get_db)):
-    try:
-        payload = _jwt_decode(token)
-        if payload.get("purpose") != "reset":
-            return _render_reset_html("Token inválido.", token=token)
-        uid = int(payload.get("uid"))
-    except Exception:
-        return _render_reset_html("Token expirado ou inválido.", token=token)
-
-    u = db.query(UserDB).filter(UserDB.id == uid).first()
-    if not u or not u.is_active:
-        return _render_reset_html("Usuário inválido.", token=token)
-
-    if len(new_password) < 8:
-        return _render_reset_html("A nova senha deve ter pelo menos 8 caracteres.", token=token)
-
-    u.password_hash = argon2.hash(new_password)
-    u.must_change_password = False
-    u.password_changed_at = agora_br()
-    u.password_version = int(u.password_version or 0) + 1
+    db.add(reset)
     db.commit()
 
-    resp = RedirectResponse("/login", status_code=303)
-    _clear_auth_cookies(resp)
+    base_url = str(request.base_url).rstrip("/")
+    reset_link = f"{base_url}/reset?token={token}"
+
+    return templates.TemplateResponse(
+        "forgot.html",
+        {"request": request, "csrf": csrf, "msg": "Link gerado.", "reset_link": reset_link},
+    )
+
+@app.get("/reset", response_class=HTMLResponse)
+def reset_page(request: Request, token: str):
+    # página simples dentro do change.html? vamos reutilizar change.html? (não)
+    # manter simples: manda pro change-password se logado
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    resp = templates.TemplateResponse(
+        "reset.html",
+        {"request": request, "csrf": csrf, "token": token},
+    )
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
     return resp
 
+@app.post("/reset", response_class=HTMLResponse)
+def reset_action(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    if not validate_csrf(request, csrf):
+        return templates.TemplateResponse(
+            "reset.html",
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "token": token, "error": "Sessão expirada. Recarregue e tente novamente."},
+            status_code=400,
+        )
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    pr = db.query(PasswordResetDB).filter(PasswordResetDB.token_hash == token_hash).first()
+    if not pr or pr.used_at is not None or pr.expires_at < agora_br():
+        return templates.TemplateResponse(
+            "reset.html",
+            {"request": request, "csrf": csrf, "token": token, "error": "Link inválido ou expirado."},
+            status_code=400,
+        )
+
+    user = db.query(UserDB).filter(UserDB.id == pr.user_id).first()
+    if not user:
+        return templates.TemplateResponse(
+            "reset.html",
+            {"request": request, "csrf": csrf, "token": token, "error": "Usuário não encontrado."},
+            status_code=400,
+        )
+
+    if len(new_password) < 8:
+        return templates.TemplateResponse(
+            "reset.html",
+            {"request": request, "csrf": csrf, "token": token, "error": "A nova senha deve ter pelo menos 8 caracteres."},
+            status_code=400,
+        )
+
+    salt, pwd_hash = hash_password(new_password)
+    user.pwd_salt = salt
+    user.pwd_hash = pwd_hash
+    user.must_change_password = 0
+    now = agora_br()
+    if user.first_password_changed_at is None:
+        user.first_password_changed_at = now
+    user.last_password_changed_at = now
+    user.password_expires_at = compute_expiry(is_first_after_temp=False)
+
+    pr.used_at = now
+    db.commit()
+
+    return RedirectResponse(url="/login", status_code=302)
+
 # =========================
-# 🔐 ADMIN
+# PROTEÇÃO DE ROTAS HTML
 # =========================
+
+def redirect_to_login(next_path: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
+
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return redirect_to_login("/")
+
+    if needs_password_change(user):
+        return RedirectResponse(url="/change-password", status_code=302)
+
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
-    u = require_user(request, db)
-    if _pwd_is_expired(u):
-        return RedirectResponse("/change-password", status_code=303)
-    require_admin(u)
+    user = get_current_user(request, db)
+    if not user:
+        return redirect_to_login("/admin")
+    if needs_password_change(user):
+        return RedirectResponse(url="/change-password", status_code=302)
+    if (user.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
 
-    csrf = _make_csrf()
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
 
-    trs = db.query(TransportadoraDB).order_by(func.lower(TransportadoraDB.nome)).all()
-    users = db.query(UserDB).order_by(func.lower(UserDB.username)).all()
-    user_map = {x.id: x.username for x in users}
+    users = db.query(UserDB).order_by(UserDB.username.asc()).all()
+    trs = db.query(TransportadoraDB).order_by(TransportadoraDB.nome.asc()).all()
+    user_map = {u.id: u.username for u in users}
 
     resp = templates.TemplateResponse(
         "admin.html",
-        {"request": request, "csrf": csrf, "admin": u, "trs": trs, "users": users, "user_map": user_map},
+        {
+            "request": request,
+            "csrf": csrf,
+            "admin": user,
+            "users": users,
+            "trs": trs,
+            "user_map": user_map,
+        },
     )
-    _set_csrf_cookie(resp, csrf)
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=True, samesite="lax", path="/")
     return resp
 
-@app.post("/admin/user/create")
+@app.post("/admin/user/create", response_class=HTMLResponse)
 def admin_create_user(
     request: Request,
-    csrf: str = Form(...),
     username: str = Form(...),
     email: str = Form(""),
     role: str = Form("user"),
     temp_password: str = Form(...),
+    csrf: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    verify_csrf(request, csrf)
-    admin = require_user(request, db)
-    require_admin(admin)
+    admin = get_current_user(request, db)
+    if not admin:
+        return redirect_to_login("/admin")
+    if (admin.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    if not validate_csrf(request, csrf):
+        return RedirectResponse(url="/admin", status_code=302)
 
-    username = (username or "").strip()
-    email = (email or "").strip() or None
-    role = (role or "user").strip().lower()
-    if role not in ("user", "admin"):
-        role = "user"
+    username = username.strip()
+    if not username:
+        return RedirectResponse(url="/admin", status_code=302)
 
-    exists = db.query(UserDB).filter(func.lower(UserDB.username) == username.lower()).first()
+    exists = db.query(UserDB).filter(UserDB.username == username).first()
     if exists:
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse(url="/admin", status_code=302)
+
+    salt, pwd_hash = hash_password(temp_password)
 
     u = UserDB(
         username=username,
-        email=email,
-        password_hash=argon2.hash(temp_password),
-        role=role,
-        is_active=True,
-        must_change_password=True,  # força troca no primeiro login
-        password_changed_at=None,
-        password_version=0,
+        email=(email.strip() or None),
+        role=("admin" if role == "admin" else "user"),
+        pwd_salt=salt,
+        pwd_hash=pwd_hash,
+        must_change_password=1,
+        password_expires_at=agora_br(),  # expira imediatamente => força troca no 1º login
         created_at=agora_br(),
     )
     db.add(u)
     db.commit()
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse(url="/admin", status_code=302)
 
-@app.post("/admin/transportadora/create")
+@app.post("/admin/transportadora/create", response_class=HTMLResponse)
 def admin_create_transportadora(
     request: Request,
-    csrf: str = Form(...),
     nome: str = Form(...),
+    csrf: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    verify_csrf(request, csrf)
-    admin = require_user(request, db)
-    require_admin(admin)
+    admin = get_current_user(request, db)
+    if not admin:
+        return redirect_to_login("/admin")
+    if (admin.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    if not validate_csrf(request, csrf):
+        return RedirectResponse(url="/admin", status_code=302)
 
-    nome = (nome or "").strip()
+    nome = nome.strip()
     if not nome:
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse(url="/admin", status_code=302)
 
-    exists = db.query(TransportadoraDB).filter(func.lower(TransportadoraDB.nome) == nome.lower()).first()
+    exists = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome)).first()
     if not exists:
-        db.add(TransportadoraDB(nome=nome, responsavel_user_id=None))
+        db.add(TransportadoraDB(nome=nome))
         db.commit()
 
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse(url="/admin", status_code=302)
 
-@app.post("/admin/transportadora/assign")
+@app.post("/admin/transportadora/assign", response_class=HTMLResponse)
 def admin_assign_transportadora(
     request: Request,
-    csrf: str = Form(...),
     transportadora_id: int = Form(...),
     responsavel_user_id: str = Form(""),
+    csrf: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    verify_csrf(request, csrf)
-    admin = require_user(request, db)
-    require_admin(admin)
+    admin = get_current_user(request, db)
+    if not admin:
+        return redirect_to_login("/admin")
+    if (admin.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    if not validate_csrf(request, csrf):
+        return RedirectResponse(url="/admin", status_code=302)
 
     tr = db.query(TransportadoraDB).filter(TransportadoraDB.id == transportadora_id).first()
     if not tr:
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse(url="/admin", status_code=302)
 
     if responsavel_user_id.strip() == "":
         tr.responsavel_user_id = None
@@ -1001,22 +1072,37 @@ def admin_assign_transportadora(
         try:
             uid = int(responsavel_user_id)
             u = db.query(UserDB).filter(UserDB.id == uid).first()
-            tr.responsavel_user_id = u.id if u else None
+            if u:
+                tr.responsavel_user_id = u.id
         except Exception:
-            tr.responsavel_user_id = None
+            pass
 
     db.commit()
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse(url="/admin", status_code=302)
 
 # =========================
-# FATURAS
+# HEALTH
 # =========================
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+# =========================
+# FATURAS (API) - protegidas
+# =========================
+
+def api_require_auth(request: Request, db: Session):
+    u = get_current_user(request, db)
+    if not u:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    if needs_password_change(u):
+        raise HTTPException(status_code=403, detail="Troca de senha necessária")
+    return u
 
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(get_db)):
-    # garante login (middleware já barra, mas aqui garante também)
-    _ = require_user(request, db)
-
+    api_require_auth(request, db)
     try:
         db_fatura = FaturaDB(
             transportadora=fatura.transportadora,
@@ -1027,8 +1113,10 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
             observacao=fatura.observacao,
         )
 
+        # se já cria como pago, registra
         if (fatura.status or "").lower() == "pago":
-            registrar_pagamento(db, db_fatura)
+            resp_nome = get_responsavel(db, db_fatura.transportadora)
+            registrar_pagamento(db, db_fatura, resp_nome)
 
         db.add(db_fatura)
         db.commit()
@@ -1047,7 +1135,7 @@ def listar_faturas(
     de_vencimento: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     atualizar_status_automatico(db)
 
@@ -1078,7 +1166,7 @@ def listar_faturas(
 
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
 def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: Session = Depends(get_db)):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -1093,7 +1181,8 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: 
     status_novo = (fatura.status or "").lower()
 
     if status_antigo != "pago" and status_novo == "pago":
-        registrar_pagamento(db, fatura)
+        resp_nome = get_responsavel(db, fatura.transportadora)
+        registrar_pagamento(db, fatura, resp_nome)
 
     if status_antigo == "pago" and status_novo != "pago":
         remover_historico_pagamento(db, fatura.id)
@@ -1105,7 +1194,7 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: 
 
 @app.delete("/faturas/{fatura_id}")
 def deletar_fatura(fatura_id: int, request: Request, db: Session = Depends(get_db)):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -1134,7 +1223,7 @@ async def upload_anexos(
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -1179,7 +1268,7 @@ async def upload_anexos(
 
 @app.get("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
 def listar_anexos(fatura_id: int, request: Request, db: Session = Depends(get_db)):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -1188,7 +1277,7 @@ def listar_anexos(fatura_id: int, request: Request, db: Session = Depends(get_db
 
 @app.get("/anexos/{anexo_id}")
 def baixar_anexo(anexo_id: int, request: Request, db: Session = Depends(get_db)):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
@@ -1207,7 +1296,7 @@ def baixar_anexo(anexo_id: int, request: Request, db: Session = Depends(get_db))
 
 @app.delete("/anexos/{anexo_id}")
 def deletar_anexo(anexo_id: int, request: Request, db: Session = Depends(get_db)):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
     if not anexo:
@@ -1234,7 +1323,7 @@ def resumo_dashboard(
     ate_vencimento: Optional[str] = Query(None),
     de_vencimento: Optional[str] = Query(None),
 ):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     atualizar_status_automatico(db)
 
@@ -1312,7 +1401,7 @@ def listar_historico_pagamentos(
     de: Optional[str] = Query(None),
     ate: Optional[str] = Query(None),
 ):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     q = db.query(HistoricoPagamentoDB)
 
@@ -1359,7 +1448,7 @@ def exportar_faturas(
     transportadora: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
-    _ = require_user(request, db)
+    api_require_auth(request, db)
 
     atualizar_status_automatico(db)
 
@@ -1399,15 +1488,11 @@ def exportar_faturas(
             except Exception:
                 pago_em = str(f.data_pagamento)
 
-        # responsável via db ou fallback
-        resp_db = get_responsavel_from_db(db, f.transportadora)
-        resp = resp_db or get_responsavel_fallback(f.transportadora) or ""
-
         writer.writerow(
             [
                 f.id,
                 f.transportadora,
-                resp,
+                get_responsavel(db, f.transportadora) or "",
                 str(f.numero_fatura),
                 float(f.valor or 0),
                 f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
