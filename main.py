@@ -24,6 +24,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware  # ✅ NOVO (opcional)
 
 from pydantic import BaseModel
 
@@ -334,7 +335,7 @@ def ensure_schema():
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transportadoras_nome ON transportadoras(nome);"))
 
-        # ✅ ESSA É A CORREÇÃO DO SEU ERRO (coluna não existia)
+        # ✅ CORREÇÃO DO ERRO (coluna não existia)
         conn.execute(text("ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS responsavel_user_id INTEGER;"))
 
         # tenta criar FK (se já existir, ignora)
@@ -588,6 +589,15 @@ class HistoricoPagamentoOut(BaseModel):
     class Config:
         from_attributes = True
 
+# ✅ NOVO: retorno de transportadoras (pra sidebar / UI)
+class TransportadoraOut(BaseModel):
+    id: int
+    nome: str
+    responsavel: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 # =========================
 # HELPERS FATURAS
 # =========================
@@ -614,6 +624,14 @@ def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
         responsavel=get_responsavel(db, f.transportadora),
         data_pagamento=f.data_pagamento,
     )
+
+def transportadora_to_out(db: Session, tr: TransportadoraDB) -> TransportadoraOut:
+    resp = None
+    if tr.responsavel_user_id:
+        u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
+        if u:
+            resp = u.username
+    return TransportadoraOut(id=tr.id, nome=tr.nome, responsavel=resp)
 
 # =========================
 # ✅ REGRA AUTOMÁTICA (atraso)
@@ -675,6 +693,18 @@ def get_db():
 # =========================
 
 app = FastAPI(title="Sistema de Faturas", version="2.0.3")
+
+# ✅ NOVO (opcional): CORS por ENV
+# Ex: CORS_ORIGINS=https://seu-front.com,https://outro.com
+cors_origins = [o.strip() for o in (os.getenv("CORS_ORIGINS", "").strip()).split(",") if o.strip()]
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -1152,6 +1182,13 @@ def me(request: Request, db: Session = Depends(get_db)):
     u = api_require_auth(request, db)
     return {"id": u.id, "username": u.username, "email": u.email, "role": u.role}
 
+# ✅ NOVO: lista transportadoras (pra sidebar / filtros)
+@app.get("/transportadoras", response_model=List[TransportadoraOut])
+def listar_transportadoras_api(request: Request, db: Session = Depends(get_db)):
+    api_require_auth(request, db)
+    trs = db.query(TransportadoraDB).order_by(TransportadoraDB.nome.asc()).all()
+    return [transportadora_to_out(db, tr) for tr in trs]
+
 # =========================
 # FATURAS (API)
 # =========================
@@ -1437,11 +1474,25 @@ def resumo_dashboard(
 
     total_geral = float(total_atrasado or 0) + float(total_em_dia or 0)
 
+    # ✅ NOVO: total pendente (em dia + atrasado)
+    total_pendente = float(total_em_dia or 0) + float(total_atrasado or 0)
+
+    # ✅ NOVO: contagens (pra cards na aba Faturas/Dashboard)
+    qtd_total = query_base.with_entities(func.count(FaturaDB.id)).scalar() or 0
+    qtd_pago = query_base.filter(FaturaDB.status.ilike("pago")).with_entities(func.count(FaturaDB.id)).scalar() or 0
+    qtd_atrasado = query_base.filter(FaturaDB.status.ilike("atrasado")).with_entities(func.count(FaturaDB.id)).scalar() or 0
+    qtd_pendente = query_base.filter(FaturaDB.status.ilike("pendente")).with_entities(func.count(FaturaDB.id)).scalar() or 0
+
     return {
         "total_geral": float(total_geral),
+        "total_pendente": float(total_pendente),
         "total_em_dia": float(total_em_dia or 0),
         "total_atrasado": float(total_atrasado or 0),
         "total_pago": float(total_pago or 0),
+        "qtd_total": int(qtd_total),
+        "qtd_pendente": int(qtd_pendente),
+        "qtd_atrasado": int(qtd_atrasado),
+        "qtd_pago": int(qtd_pago),
     }
 
 # =========================
@@ -1513,6 +1564,9 @@ def exportar_faturas(
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
+    de_vencimento: Optional[str] = Query(None),
+    ate_vencimento: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
     atualizar_status_automatico(db)
@@ -1525,6 +1579,20 @@ def exportar_faturas(
         query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
+    if status:
+        query = query.filter(FaturaDB.status.ilike(status.strip()))
+    if de_vencimento:
+        try:
+            d1 = datetime.strptime(de_vencimento, "%Y-%m-%d").date()
+            query = query.filter(FaturaDB.data_vencimento >= d1)
+        except ValueError:
+            pass
+    if ate_vencimento:
+        try:
+            d2 = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            query = query.filter(FaturaDB.data_vencimento <= d2)
+        except ValueError:
+            pass
 
     faturas = query.order_by(FaturaDB.id.desc()).all()
 
@@ -1576,6 +1644,9 @@ def exportar_historico(
     request: Request,
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
+    de: Optional[str] = Query(None),
+    ate: Optional[str] = Query(None),
+    numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
 
@@ -1585,6 +1656,22 @@ def exportar_historico(
     q = db.query(HistoricoPagamentoDB)
     if transportadora:
         q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
+    if numero_fatura:
+        q = q.filter(HistoricoPagamentoDB.numero_fatura.ilike(f"%{numero_fatura}%"))
+
+    if de:
+        try:
+            d1 = datetime.strptime(de, "%Y-%m-%d").date()
+            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) >= d1)
+        except ValueError:
+            pass
+
+    if ate:
+        try:
+            d2 = datetime.strptime(ate, "%Y-%m-%d").date()
+            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) <= d2)
+        except ValueError:
+            pass
 
     itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
 
@@ -1621,5 +1708,15 @@ def exportar_historico_alias(
     request: Request,
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
+    de: Optional[str] = Query(None),
+    ate: Optional[str] = Query(None),
+    numero_fatura: Optional[str] = Query(None),
 ):
-    return exportar_historico(request=request, db=db, transportadora=transportadora)
+    return exportar_historico(
+        request=request,
+        db=db,
+        transportadora=transportadora,
+        de=de,
+        ate=ate,
+        numero_fatura=numero_fatura,
+    )
