@@ -14,35 +14,23 @@
     .btn{margin-top:14px;width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#1f6feb;color:white;font-weight:700;cursor:pointer}
     .btn:hover{filter:brightness(1.05)}
     .ok{margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.25)}
-    .warn{margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25)}
     a{color:#93c5fd;text-decoration:none} a:hover{text-decoration:underline}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Redefinir senha</h1>
-    <p class="muted">Informe seu usuário ou e-mail.</p>
+    <p class="muted">Informe seu usuário. (No modo atual, o Admin fará o reset.)</p>
 
     {% if msg %}
       <div class="ok">{{ msg }}</div>
     {% endif %}
 
     <form method="post" action="/forgot">
-      <input type="hidden" name="csrf" value="{{ csrf }}" />
-      <label>Usuário ou e-mail</label>
-      <input name="username_or_email" required />
-      <button class="btn" type="submit">Gerar link</button>
+      <label>Usuário</label>
+      <input name="username" required />
+      <button class="btn" type="submit">Continuar</button>
     </form>
-
-    {% if reset_link %}
-      <div class="warn">
-        <b>Link gerado (modo sem e-mail):</b><br/>
-        <a href="{{ reset_link }}">{{ reset_link }}</a>
-        <div class="muted" style="margin-top:8px;">
-          Depois a gente integra envio por e-mail automático.
-        </div>
-      </div>
-    {% endif %}
 
     <p style="margin-top:14px;"><a href="/login">Voltar ao login</a></p>
   </div>
