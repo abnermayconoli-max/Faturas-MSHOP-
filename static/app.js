@@ -2,27 +2,22 @@
 const API_BASE = "";
 
 // ============ ESTADO (FILTROS) ============
-
-// Filtros globais (sidebar + busca)
 let filtroTransportadora = "";
 let filtroVencimentoDe = "";
 let filtroVencimentoAte = "";
 let filtroNumeroFatura = "";
 
-// Filtros só da aba Faturas
 let filtroDataInicioFaturas = "";
 let filtroDataFimFaturas = "";
 let filtroStatus = "";
 
-// modo do dashboard (pendente/pago)
 let dashboardModo = "pendente";
 
-// Cache da última lista vinda da API
 let ultimaListaFaturas = [];
 let ultimaListaHistorico = [];
 
-// ✅ usuário logado (/me)
-let usuarioLogado = null;
+// cache do usuário logado
+let currentUser = null;
 
 // ============ HELPERS ============
 
@@ -36,20 +31,16 @@ function formatCurrency(valor) {
   });
 }
 
-// converte string ISO (yyyy-mm-dd ou data completa) pra Date LOCAL
 function parseISODateLocal(isoDate) {
   if (!isoDate) return null;
-
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
     const [y, m, d] = isoDate.split("-").map(Number);
     return new Date(y, m - 1, d);
   }
-
   const d = new Date(isoDate);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// dd/mm/aaaa
 function formatDate(isoDate) {
   if (!isoDate) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
@@ -68,103 +59,154 @@ function formatDateTime(isoDateTime) {
   return d.toLocaleString("pt-BR");
 }
 
-// ✅ fetch com tratamento de auth
-async function fetchJson(url, options = {}) {
-  const resp = await fetch(url, options);
+// fetch padrão com cookie (sessão)
+async function apiFetch(url, options = {}) {
+  const opts = {
+    credentials: "include",
+    ...options,
+  };
+  const resp = await fetch(url, opts);
 
-  // se caiu sessão
   if (resp.status === 401) {
-    window.location.href = "/login?next=/";
-    return null;
+    alert("Sessão expirada. Faça login novamente.");
+    window.location.href = "/"; // se tiver página de login separada, mude aqui
+    throw new Error("401 não autenticado");
   }
-  // se precisa trocar senha
-  if (resp.status === 403) {
-    window.location.href = "/change-password";
-    return null;
-  }
-
-  if (!resp.ok) {
-    // tenta ler JSON detail
-    let detalhe = "";
-    try {
-      const ct = resp.headers.get("content-type") || "";
-      if (ct.includes("application/json")) {
-        const j = await resp.json();
-        detalhe = j?.detail ? String(j.detail) : JSON.stringify(j);
-      } else {
-        detalhe = await resp.text();
-      }
-    } catch (_) {}
-    const err = new Error(`HTTP ${resp.status} - ${detalhe || "Erro"}`);
-    err.status = resp.status;
-    err.detail = detalhe;
-    throw err;
-  }
-
-  const ct = resp.headers.get("content-type") || "";
-  if (ct.includes("application/json")) return await resp.json();
-  return await resp.text();
+  return resp;
 }
 
-// ✅ carrega /me e preenche Perfil
-async function carregarUsuarioLogado() {
+// ============ PERFIL / AUTH ============
+
+async function carregarMe() {
   try {
-    usuarioLogado = await fetchJson(`${API_BASE}/me`);
-    renderPerfil();
-  } catch (e) {
-    console.error("Erro ao carregar /me:", e);
-    // se der erro, não bloqueia o site
+    const resp = await apiFetch(`${API_BASE}/me`);
+    if (!resp.ok) throw new Error("Erro ao buscar /me");
+    currentUser = await resp.json();
+
+    const nome = document.getElementById("perfilNome");
+    const email = document.getElementById("perfilEmail");
+    const role = document.getElementById("perfilRole");
+    const status = document.getElementById("perfilStatus");
+
+    if (nome) nome.textContent = currentUser.nome || "-";
+    if (email) email.textContent = currentUser.email || "-";
+    if (role) role.textContent = (currentUser.role || "-").toUpperCase();
+    if (status) status.textContent = "Logado";
+
+    // mostra bloco admin se for admin
+    const adminSec = document.getElementById("adminConfigSection");
+    if (adminSec) {
+      adminSec.style.display =
+        (currentUser.role || "").toLowerCase() === "admin" ? "block" : "none";
+    }
+  } catch (err) {
+    console.error(err);
   }
 }
 
-// ✅ render perfil
-function renderPerfil() {
-  const box = document.getElementById("perfilBox");
-  if (!box) return;
+async function logout() {
+  try {
+    const resp = await apiFetch(`${API_BASE}/auth/logout`, { method: "POST" });
+    if (!resp.ok) throw new Error("Erro ao deslogar");
+    alert("Você saiu da conta.");
+    window.location.href = "/";
+  } catch (err) {
+    console.error(err);
+    alert("Erro ao deslogar");
+  }
+}
 
-  if (!usuarioLogado) {
-    box.innerHTML = `<p>Não foi possível carregar o perfil.</p>`;
+// Admin: criar user
+async function adminCriarUsuario() {
+  const nome = document.getElementById("adminNovoUsuarioNome")?.value?.trim() || "";
+  const email = document.getElementById("adminNovoUsuarioEmail")?.value?.trim() || "";
+  const senha = document.getElementById("adminNovoUsuarioSenha")?.value || "";
+  const role = document.getElementById("adminNovoUsuarioRole")?.value || "user";
+
+  if (!nome || !email || !senha) {
+    alert("Preencha nome, email e senha.");
     return;
   }
 
-  const role = (usuarioLogado.role || "").toLowerCase();
-  const isAdmin = role === "admin";
+  try {
+    const resp = await apiFetch(
+      `${API_BASE}/admin/users?nome=${encodeURIComponent(nome)}&email=${encodeURIComponent(
+        email
+      )}&senha=${encodeURIComponent(senha)}&role=${encodeURIComponent(role)}`,
+      { method: "POST" }
+    );
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(j?.detail || "Erro ao criar usuário");
 
-  box.innerHTML = `
-    <div class="perfil-grid">
-      <div class="perfil-card">
-        <h3>Seu perfil</h3>
-        <p><strong>Usuário:</strong> ${usuarioLogado.username || "-"}</p>
-        <p><strong>Email:</strong> ${usuarioLogado.email || "-"}</p>
-        <p><strong>Permissão:</strong> ${usuarioLogado.role || "-"}</p>
-      </div>
+    alert("Usuário cadastrado com sucesso!");
+    document.getElementById("adminNovoUsuarioNome").value = "";
+    document.getElementById("adminNovoUsuarioEmail").value = "";
+    document.getElementById("adminNovoUsuarioSenha").value = "";
+    document.getElementById("adminNovoUsuarioRole").value = "user";
+  } catch (err) {
+    console.error(err);
+    alert(String(err.message || err));
+  }
+}
 
-      <div class="perfil-card">
-        <h3>Ações</h3>
-        <div class="perfil-actions">
-          <a class="primary-link" href="/change-password">Trocar senha</a>
-          <button id="btnLogout" type="button" class="btn-warn">Sair</button>
-          ${
-            isAdmin
-              ? `<button id="btnAdmin" type="button" class="secondary">Configurações (Admin)</button>`
-              : ""
-          }
-        </div>
-        ${
-          isAdmin
-            ? `<p class="perfil-hint">Como admin, você pode cadastrar usuários, adicionar transportadoras e definir responsáveis.</p>`
-            : `<p class="perfil-hint">Se você precisar de permissões de admin, fale com o administrador.</p>`
-        }
-      </div>
-    </div>
-  `;
+// Admin: add transportadora
+async function adminAddTransportadora() {
+  const nome = document.getElementById("adminNovaTransportadora")?.value?.trim() || "";
+  const responsavel = document.getElementById("adminNovoResponsavel")?.value?.trim() || "";
 
-  // listeners
-  const btnLogout = document.getElementById("btnLogout");
-  if (btnLogout) btnLogout.addEventListener("click", () => (window.location.href = "/logout"));
+  if (!nome) {
+    alert("Informe a transportadora.");
+    return;
+  }
 
-  const btnAdmin = document.getElementById("btnAdmin");
-  if (btnAdmin) btnAdmin.addEventListener("click", () => (window.location.href = "/admin"));
+  try {
+    const url = `${API_BASE}/admin/transportadoras?nome=${encodeURIComponent(nome)}&responsavel=${encodeURIComponent(
+      responsavel
+    )}`;
+
+    const resp = await apiFetch(url, { method: "POST" });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(j?.detail || "Erro ao adicionar transportadora");
+
+    alert("Transportadora adicionada!");
+    document.getElementById("adminNovaTransportadora").value = "";
+    document.getElementById("adminNovoResponsavel").value = "";
+  } catch (err) {
+    console.error(err);
+    alert(String(err.message || err));
+  }
+}
+
+// Admin: alterar responsável
+async function adminAlterarResponsavel() {
+  const nome = document.getElementById("adminAlterarTransportadora")?.value?.trim() || "";
+  const responsavel = document.getElementById("adminAlterarResponsavel")?.value?.trim() || "";
+
+  if (!nome || !responsavel) {
+    alert("Preencha transportadora e novo responsável.");
+    return;
+  }
+
+  try {
+    const url = `${API_BASE}/admin/transportadoras/responsavel?nome_transportadora=${encodeURIComponent(
+      nome
+    )}&responsavel=${encodeURIComponent(responsavel)}`;
+
+    const resp = await apiFetch(url, { method: "PUT" });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(j?.detail || "Erro ao alterar responsável");
+
+    alert("Responsável alterado!");
+    document.getElementById("adminAlterarTransportadora").value = "";
+    document.getElementById("adminAlterarResponsavel").value = "";
+
+    // recarrega listas
+    await carregarFaturas();
+    await carregarDashboard();
+  } catch (err) {
+    console.error(err);
+    alert(String(err.message || err));
+  }
 }
 
 // ============ DASHBOARD ============
@@ -184,8 +226,10 @@ async function carregarDashboard() {
         ? `${API_BASE}/dashboard/resumo?${params.toString()}`
         : `${API_BASE}/dashboard/resumo`;
 
-    const dataResumo = await fetchJson(urlResumo);
-    if (!dataResumo) return;
+    const respResumo = await apiFetch(urlResumo);
+    if (!respResumo.ok) throw new Error("Erro ao buscar resumo");
+
+    const dataResumo = await respResumo.json();
 
     const boxTotalGeral = document.getElementById("cardTotalGeralBox");
     const boxEmDia = document.getElementById("cardEmDiaBox");
@@ -227,11 +271,13 @@ async function carregarDashboard() {
           ? `${API_BASE}/faturas?${params.toString()}`
           : `${API_BASE}/faturas`;
 
-      lista = await fetchJson(urlF);
-      if (!lista) return;
+      const respFat = await apiFetch(urlF);
+      if (!respFat.ok) throw new Error("Erro ao buscar faturas");
+      lista = await respFat.json();
+      ultimaListaFaturas = lista;
     }
 
-    if (dashboardModo === "pago") {
+    if (dashboardModo ===_toggleis = "pago") {
       renderResumoDashboardPago(lista);
     } else {
       renderResumoDashboardPendente(lista);
@@ -249,7 +295,6 @@ function renderResumoDashboardPendente(lista) {
   const tbody = document.getElementById("tbodyResumoDashboard");
   if (!thead || !tbody) return;
 
-  // datas pendente/atrasado
   const datasSet = new Set();
   (lista || []).forEach((f) => {
     const st = (f.status || "").toLowerCase();
@@ -257,7 +302,6 @@ function renderResumoDashboardPendente(lista) {
   });
   const datas = Array.from(datasSet).sort();
 
-  // header
   let headerHtml = `
     <tr>
       <th>Responsável</th>
@@ -270,25 +314,20 @@ function renderResumoDashboardPendente(lista) {
   headerHtml += "</tr>";
   thead.innerHTML = headerHtml;
 
-  // calcular corte: "quarta da próxima semana" quando hoje é segunda, senão próxima quarta normal.
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
 
-  // próxima quarta (dom=0, seg=1, ter=2, qua=3)
   const wd = hoje.getDay();
   let diasAteQuarta = (3 - wd + 7) % 7;
   if (diasAteQuarta === 0) diasAteQuarta = 7;
   let inicioEmDia = new Date(hoje);
   inicioEmDia.setDate(hoje.getDate() + diasAteQuarta);
 
-  // ✅ se HOJE é SEGUNDA (1), pula mais 7 dias (vira a quarta da semana seguinte)
-  if (wd === 1) {
-    inicioEmDia.setDate(inicioEmDia.getDate() + 7);
-  }
+  if (wd === 1) inicioEmDia.setDate(inicioEmDia.getDate() + 7);
+
   inicioEmDia.setHours(0, 0, 0, 0);
   const inicioTime = inicioEmDia.getTime();
 
-  // agrupa por transportadora, mantendo o responsavel
   const grupos = {};
   (lista || []).forEach((f) => {
     const transp = f.transportadora || "Sem nome";
@@ -317,7 +356,6 @@ function renderResumoDashboardPendente(lista) {
       if (st === "atrasado") {
         grupos[transp].totalAtrasado += valor;
       } else if (st === "pendente") {
-        // ✅ regra: em dia = vencimento >= inicioEmDia
         if (vencTime < inicioTime) grupos[transp].totalAtrasado += valor;
         else grupos[transp].totalEmDia += valor;
       }
@@ -327,7 +365,6 @@ function renderResumoDashboardPendente(lista) {
     grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
   });
 
-  // ordem fixa (para garantir agrupamento bonito por responsável)
   const transpOrder = ["DHL", "Pannan", "Transbritto", "PDA", "GLM", "Garcia", "Excargo"];
   const ordem = Object.keys(grupos).sort((a, b) => {
     const ia = transpOrder.indexOf(a);
@@ -340,13 +377,11 @@ function renderResumoDashboardPendente(lista) {
 
   tbody.innerHTML = "";
 
-  // totais gerais
   let totalGeralAtrasado = 0;
   let totalGeralEmDia = 0;
   let totalGeral = 0;
   const totaisPorData = {};
 
-  // subtotal por responsável
   let respAtual = null;
   let subAtrasado = 0;
   let subEmDia = 0;
@@ -371,13 +406,11 @@ function renderResumoDashboardPendente(lista) {
     trTotalResp.innerHTML = html;
     tbody.appendChild(trTotalResp);
 
-    // ✅ linha em branco (igual na sua 1ª imagem)
     const spacer = document.createElement("tr");
     spacer.className = "spacer-row";
     spacer.innerHTML = `<td colspan="${5 + datas.length}">&nbsp;</td>`;
     tbody.appendChild(spacer);
 
-    // reseta subtotais
     subAtrasado = 0;
     subEmDia = 0;
     subGeral = 0;
@@ -388,19 +421,16 @@ function renderResumoDashboardPendente(lista) {
     const g = grupos[transp];
     const resp = g.responsavel || "-";
 
-    // quando muda o responsável, fecha o subtotal do anterior
     if (respAtual === null) respAtual = resp;
     if (resp !== respAtual) {
       flushSubtotalResponsavel();
       respAtual = resp;
     }
 
-    // acumula total geral
     totalGeralAtrasado += g.totalAtrasado;
     totalGeralEmDia += g.totalEmDia;
     totalGeral += g.totalGeral;
 
-    // acumula subtotal do responsável
     subAtrasado += g.totalAtrasado;
     subEmDia += g.totalEmDia;
     subGeral += g.totalGeral;
@@ -411,7 +441,6 @@ function renderResumoDashboardPendente(lista) {
       subPorData[d] = (subPorData[d] || 0) + v;
     });
 
-    // linha normal
     const tr = document.createElement("tr");
     let html = `
       <td>${g.responsavel || "-"}</td>
@@ -428,10 +457,8 @@ function renderResumoDashboardPendente(lista) {
     tbody.appendChild(tr);
   });
 
-  // fecha o último responsável
   if (ordem.length > 0) flushSubtotalResponsavel();
 
-  // total geral final
   if (Object.keys(grupos).length > 0) {
     const trTotal = document.createElement("tr");
     let html = `
@@ -489,7 +516,6 @@ function renderResumoDashboardPago(lista) {
     grupos[transp].porData[key] = (grupos[transp].porData[key] || 0) + valor;
   });
 
-  // ordem fixa (igual pendente)
   const transpOrder = ["DHL", "Pannan", "Transbritto", "PDA", "GLM", "Garcia", "Excargo"];
   const ordem = Object.keys(grupos).sort((a, b) => {
     const ia = transpOrder.indexOf(a);
@@ -505,7 +531,6 @@ function renderResumoDashboardPago(lista) {
   const totaisPorData = {};
   let totalGeralPago = 0;
 
-  // subtotal por responsável
   let respAtual = null;
   let subPago = 0;
   let subPorData = {};
@@ -526,7 +551,6 @@ function renderResumoDashboardPago(lista) {
     trTotalResp.innerHTML = html;
     tbody.appendChild(trTotalResp);
 
-    // ✅ linha em branco
     const spacer = document.createElement("tr");
     spacer.className = "spacer-row";
     spacer.innerHTML = `<td colspan="${3 + datas.length}">&nbsp;</td>`;
@@ -572,7 +596,6 @@ function renderResumoDashboardPago(lista) {
 
   if (ordem.length > 0) flushSubtotalResponsavel();
 
-  // total geral
   const trTotal = document.createElement("tr");
   let html = `
     <td><strong>-</strong></td>
@@ -602,13 +625,14 @@ async function carregarFaturas() {
         ? `${API_BASE}/faturas?${params.toString()}`
         : `${API_BASE}/faturas`;
 
-    const faturas = await fetchJson(url);
-    if (!faturas) return;
+    const resp = await apiFetch(url);
+    if (!resp.ok) throw new Error("Erro ao listar faturas");
 
+    const faturas = await resp.json();
     ultimaListaFaturas = faturas;
 
     renderizarFaturas();
-    carregarDashboard();
+    await carregarDashboard();
   } catch (err) {
     console.error(err);
     alert("Erro ao carregar faturas");
@@ -741,9 +765,10 @@ async function carregarHistorico() {
         ? `${API_BASE}/historico_pagamentos?${params.toString()}`
         : `${API_BASE}/historico_pagamentos`;
 
-    const hist = await fetchJson(url);
-    if (!hist) return;
+    const resp = await apiFetch(url);
+    if (!resp.ok) throw new Error("Erro ao listar histórico");
 
+    const hist = await resp.json();
     ultimaListaHistorico = hist;
 
     renderizarHistorico();
@@ -910,7 +935,8 @@ async function excluirFatura(id) {
   if (!confirm(`Excluir fatura ${id}?`)) return;
 
   try {
-    await fetchJson(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
+    const resp = await apiFetch(`${API_BASE}/faturas/${id}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error("Erro ao excluir");
     await carregarFaturas();
     await carregarHistorico();
   } catch (err) {
@@ -936,8 +962,9 @@ async function abrirModalAnexos(faturaId) {
   lista.innerHTML = "Carregando...";
 
   try {
-    const anexos = await fetchJson(`${API_BASE}/faturas/${faturaId}/anexos`);
-    if (!anexos) return;
+    const resp = await apiFetch(`${API_BASE}/faturas/${faturaId}/anexos`);
+    if (!resp.ok) throw new Error("Erro ao listar anexos");
+    const anexos = await resp.json();
 
     if (!anexos.length) {
       lista.innerHTML = "<li>Sem anexos.</li>";
@@ -964,7 +991,10 @@ async function abrirModalAnexos(faturaId) {
           if (!confirm(`Excluir o anexo "${a.original_name}"?`)) return;
 
           try {
-            await fetchJson(`${API_BASE}/anexos/${a.id}`, { method: "DELETE" });
+            const respDel = await apiFetch(`${API_BASE}/anexos/${a.id}`, {
+              method: "DELETE",
+            });
+            if (!respDel.ok) throw new Error("Erro ao excluir anexo");
             abrirModalAnexos(faturaId);
           } catch (err) {
             console.error(err);
@@ -1006,37 +1036,53 @@ async function salvarFatura(e) {
     let resp;
 
     if (editId) {
-      resp = await fetchJson(`${API_BASE}/faturas/${editId}`, {
+      resp = await apiFetch(`${API_BASE}/faturas/${editId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     } else {
-      resp = await fetchJson(`${API_BASE}/faturas`, {
+      resp = await apiFetch(`${API_BASE}/faturas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     }
 
-    if (!resp) return;
+    if (!resp.ok) throw new Error("Erro ao salvar fatura");
 
-    const fatura = resp;
+    const fatura = await resp.json();
 
     const inputAnexos = document.getElementById("inputAnexos");
     if (inputAnexos && inputAnexos.files && inputAnexos.files.length > 0) {
       const fd = new FormData();
       for (const file of inputAnexos.files) fd.append("files", file);
 
-      try {
-        await fetchJson(`${API_BASE}/faturas/${fatura.id}/anexos`, {
-          method: "POST",
-          body: fd,
-        });
+      const respAnexos = await apiFetch(`${API_BASE}/faturas/${fatura.id}/anexos`, {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!respAnexos.ok) {
+        let detalhe = "";
+        try {
+          const ct = respAnexos.headers.get("content-type") || "";
+          if (ct.includes("application/json")) {
+            const j = await respAnexos.json();
+            detalhe = j?.detail ? String(j.detail) : JSON.stringify(j);
+          } else {
+            detalhe = await respAnexos.text();
+          }
+        } catch (_) {}
+
+        console.error("Erro ao enviar anexos:", respAnexos.status, detalhe);
+        alert(
+          `A fatura foi salva, mas o upload do anexo FALHOU.\n\nStatus: ${respAnexos.status}\n${
+            detalhe || ""
+          }`
+        );
+      } else {
         inputAnexos.value = "";
-      } catch (e) {
-        console.error("Erro upload anexos:", e);
-        alert(`A fatura foi salva, mas o upload do anexo FALHOU.\n\n${e.message || ""}`);
       }
     }
 
@@ -1059,21 +1105,16 @@ function ativarAba(aba) {
   const cad = document.getElementById("cadastroSection");
   const fat = document.getElementById("faturasSection");
   const hist = document.getElementById("historicoSection");
-  const perfil = document.getElementById("perfilSection"); // ✅ novo
+  const perfil = document.getElementById("perfilSection");
 
   const tabDash = document.getElementById("tabDashboard");
   const tabCad = document.getElementById("tabCadastro");
   const tabFat = document.getElementById("tabFaturas");
   const tabHist = document.getElementById("tabHistorico");
-  const tabPerfil = document.getElementById("tabPerfil"); // ✅ novo
+  const tabPerfil = document.getElementById("tabPerfil");
 
-  [dash, cad, fat, hist, perfil].forEach((s) => {
-    if (s) s.classList.remove("visible");
-  });
-
-  [tabDash, tabCad, tabFat, tabHist, tabPerfil].forEach((t) => {
-    if (t) t.classList.remove("active");
-  });
+  [dash, cad, fat, hist, perfil].forEach((s) => s && s.classList.remove("visible"));
+  [tabDash, tabCad, tabFat, tabHist, tabPerfil].forEach((t) => t && t.classList.remove("active"));
 
   if (aba === "dashboard") {
     dash.classList.add("visible");
@@ -1086,9 +1127,9 @@ function ativarAba(aba) {
     tabHist.classList.add("active");
     carregarHistorico();
   } else if (aba === "perfil") {
-    if (perfil) perfil.classList.add("visible");
-    if (tabPerfil) tabPerfil.classList.add("active");
-    renderPerfil();
+    perfil.classList.add("visible");
+    tabPerfil.classList.add("active");
+    carregarMe();
   } else {
     fat.classList.add("visible");
     tabFat.classList.add("active");
@@ -1112,21 +1153,20 @@ function exportarExcel() {
 
 // ============ INIT ============
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   setupMenuDelegation();
 
-  const tabDashboard = document.getElementById("tabDashboard");
-  const tabCadastro = document.getElementById("tabCadastro");
-  const tabFaturas = document.getElementById("tabFaturas");
-  const tabHistorico = document.getElementById("tabHistorico");
-  const tabPerfil = document.getElementById("tabPerfil"); // ✅ novo
+  // tabs
+  document.getElementById("tabDashboard")?.addEventListener("click", () => ativarAba("dashboard"));
+  document.getElementById("tabCadastro")?.addEventListener("click", () => ativarAba("cadastro"));
+  document.getElementById("tabFaturas")?.addEventListener("click", () => ativarAba("faturas"));
+  document.getElementById("tabHistorico")?.addEventListener("click", () => ativarAba("historico"));
+  document.getElementById("tabPerfil")?.addEventListener("click", () => ativarAba("perfil"));
 
-  if (tabDashboard) tabDashboard.addEventListener("click", () => ativarAba("dashboard"));
-  if (tabCadastro) tabCadastro.addEventListener("click", () => ativarAba("cadastro"));
-  if (tabFaturas) tabFaturas.addEventListener("click", () => ativarAba("faturas"));
-  if (tabHistorico) tabHistorico.addEventListener("click", () => ativarAba("historico"));
-  if (tabPerfil) tabPerfil.addEventListener("click", () => ativarAba("perfil"));
+  // logout
+  document.getElementById("btnLogout")?.addEventListener("click", logout);
 
+  // dashboard modo
   const btnPend = document.getElementById("btnDashboardPendente");
   const btnPago = document.getElementById("btnDashboardPago");
 
@@ -1146,47 +1186,46 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  const btnHome = document.getElementById("btnHome");
-  if (btnHome) {
-    btnHome.addEventListener("click", () => {
-      filtroTransportadora = "";
-      filtroVencimentoDe = "";
-      filtroVencimentoAte = "";
-      filtroNumeroFatura = "";
-      filtroDataInicioFaturas = "";
-      filtroDataFimFaturas = "";
-      filtroStatus = "";
+  // home button
+  document.getElementById("btnHome")?.addEventListener("click", () => {
+    filtroTransportadora = "";
+    filtroVencimentoDe = "";
+    filtroVencimentoAte = "";
+    filtroNumeroFatura = "";
+    filtroDataInicioFaturas = "";
+    filtroDataFimFaturas = "";
+    filtroStatus = "";
 
-      const de = document.getElementById("filtroVencimentoDe");
-      const ate = document.getElementById("filtroVencimentoAte");
-      if (de) de.value = "";
-      if (ate) ate.value = "";
+    const de = document.getElementById("filtroVencimentoDe");
+    const ate = document.getElementById("filtroVencimentoAte");
+    if (de) de.value = "";
+    if (ate) ate.value = "";
 
-      const buscaNumero = document.getElementById("buscaNumero");
-      if (buscaNumero) buscaNumero.value = "";
+    const buscaNumero = document.getElementById("buscaNumero");
+    if (buscaNumero) buscaNumero.value = "";
 
-      const ini = document.getElementById("filtroDataInicioFaturas");
-      const fim = document.getElementById("filtroDataFimFaturas");
-      if (ini) ini.value = "";
-      if (fim) fim.value = "";
+    const ini = document.getElementById("filtroDataInicioFaturas");
+    const fim = document.getElementById("filtroDataFimFaturas");
+    if (ini) ini.value = "";
+    if (fim) fim.value = "";
 
-      const statusSelect = document.getElementById("filtroStatus");
-      if (statusSelect) statusSelect.value = "";
+    const statusSelect = document.getElementById("filtroStatus");
+    if (statusSelect) statusSelect.value = "";
 
-      document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
+    document.querySelectorAll(".transportadora-btn").forEach((b) => b.classList.remove("selected"));
 
-      dashboardModo = "pendente";
-      if (btnPend && btnPago) {
-        btnPend.classList.add("active");
-        btnPago.classList.remove("active");
-      }
+    dashboardModo = "pendente";
+    if (btnPend && btnPago) {
+      btnPend.classList.add("active");
+      btnPago.classList.remove("active");
+    }
 
-      ativarAba("dashboard");
-      carregarFaturas();
-      carregarHistorico();
-    });
-  }
+    ativarAba("dashboard");
+    carregarFaturas();
+    carregarHistorico();
+  });
 
+  // sidebar transportadoras
   document.querySelectorAll(".transportadora-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       filtroTransportadora = btn.dataset.transportadora || "";
@@ -1213,55 +1252,54 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  const btnLimparFiltros = document.getElementById("btnLimparFiltros");
-  if (btnLimparFiltros) {
-    btnLimparFiltros.addEventListener("click", () => {
-      filtroVencimentoDe = "";
-      filtroVencimentoAte = "";
-      filtroNumeroFatura = "";
-      filtroDataInicioFaturas = "";
-      filtroDataFimFaturas = "";
-      filtroStatus = "";
+  document.getElementById("btnLimparFiltros")?.addEventListener("click", () => {
+    filtroVencimentoDe = "";
+    filtroVencimentoAte = "";
+    filtroNumeroFatura = "";
+    filtroDataInicioFaturas = "";
+    filtroDataFimFaturas = "";
+    filtroStatus = "";
 
-      if (inputDe) inputDe.value = "";
-      if (inputAte) inputAte.value = "";
+    if (inputDe) inputDe.value = "";
+    if (inputAte) inputAte.value = "";
 
-      const buscaNumero = document.getElementById("buscaNumero");
-      if (buscaNumero) buscaNumero.value = "";
+    const buscaNumero = document.getElementById("buscaNumero");
+    if (buscaNumero) buscaNumero.value = "";
 
-      const ini = document.getElementById("filtroDataInicioFaturas");
-      const fim = document.getElementById("filtroDataFimFaturas");
-      if (ini) ini.value = "";
-      if (fim) fim.value = "";
+    const ini = document.getElementById("filtroDataInicioFaturas");
+    const fim = document.getElementById("filtroDataFimFaturas");
+    if (ini) ini.value = "";
+    if (fim) fim.value = "";
 
-      const statusSelect = document.getElementById("filtroStatus");
-      if (statusSelect) statusSelect.value = "";
+    const statusSelect = document.getElementById("filtroStatus");
+    if (statusSelect) statusSelect.value = "";
 
-      carregarFaturas();
-      carregarHistorico();
-    });
-  }
+    carregarFaturas();
+    carregarHistorico();
+  });
 
-  const btnLimparPeriodoFaturas = document.getElementById("btnLimparPeriodoFaturas");
-  if (btnLimparPeriodoFaturas) {
-    btnLimparPeriodoFaturas.addEventListener("click", () => {
-      filtroDataInicioFaturas = "";
-      filtroDataFimFaturas = "";
+  document.getElementById("btnLimparPeriodoFaturas")?.addEventListener("click", () => {
+    filtroDataInicioFaturas = "";
+    filtroDataFimFaturas = "";
 
-      const ini = document.getElementById("filtroDataInicioFaturas");
-      const fim = document.getElementById("filtroDataFimFaturas");
-      if (ini) ini.value = "";
-      if (fim) fim.value = "";
+    const ini = document.getElementById("filtroDataInicioFaturas");
+    const fim = document.getElementById("filtroDataFimFaturas");
+    if (ini) ini.value = "";
+    if (fim) fim.value = "";
 
-      renderizarFaturas();
-    });
-  }
+    renderizarFaturas();
+  });
 
+  // busca nº fatura (com debounce pra ficar leve)
+  let tBusca = null;
   const buscaNumero = document.getElementById("buscaNumero");
   if (buscaNumero) {
     buscaNumero.addEventListener("input", (e) => {
-      filtroNumeroFatura = e.target.value.trim();
-      carregarFaturas();
+      clearTimeout(tBusca);
+      tBusca = setTimeout(() => {
+        filtroNumeroFatura = e.target.value.trim();
+        carregarFaturas();
+      }, 250);
     });
   }
 
@@ -1271,36 +1309,33 @@ document.addEventListener("DOMContentLoaded", () => {
   if (fim) fim.addEventListener("change", (e) => ((filtroDataFimFaturas = e.target.value), renderizarFaturas()));
 
   const statusSelect = document.getElementById("filtroStatus");
-  if (statusSelect) statusSelect.addEventListener("change", (e) => ((filtroStatus = e.target.value), renderizarFaturas()));
+  if (statusSelect)
+    statusSelect.addEventListener("change", (e) => ((filtroStatus = e.target.value), renderizarFaturas()));
 
-  const btnAtualizar = document.getElementById("btnAtualizarFaturas");
-  if (btnAtualizar) btnAtualizar.addEventListener("click", (e) => (e.preventDefault(), carregarFaturas()));
+  document.getElementById("btnAtualizarFaturas")?.addEventListener("click", (e) => (e.preventDefault(), carregarFaturas()));
+  document.getElementById("btnExportarExcel")?.addEventListener("click", exportarExcel);
 
-  const btnExportar = document.getElementById("btnExportarExcel");
-  if (btnExportar) btnExportar.addEventListener("click", exportarExcel);
+  document.getElementById("btnAtualizarHistorico")?.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
+  document.getElementById("btnExportarHistorico")?.addEventListener("click", exportarHistorico);
 
-  // ✅ histórico botões
-  const btnAtualizarHistorico = document.getElementById("btnAtualizarHistorico");
-  if (btnAtualizarHistorico) btnAtualizarHistorico.addEventListener("click", (e) => (e.preventDefault(), carregarHistorico()));
+  document.getElementById("formFatura")?.addEventListener("submit", salvarFatura);
 
-  const btnExportarHistorico = document.getElementById("btnExportarHistorico");
-  if (btnExportarHistorico) btnExportarHistorico.addEventListener("click", exportarHistorico);
+  document.getElementById("modalFechar")?.addEventListener("click", () =>
+    document.getElementById("modalAnexos")?.classList.remove("open")
+  );
+  document.getElementById("modalAnexos")?.addEventListener("click", (e) => {
+    if (e.target.id === "modalAnexos") {
+      document.getElementById("modalAnexos")?.classList.remove("open");
+    }
+  });
 
-  const formFatura = document.getElementById("formFatura");
-  if (formFatura) formFatura.addEventListener("submit", salvarFatura);
+  // Admin buttons no perfil
+  document.getElementById("btnAdminCriarUsuario")?.addEventListener("click", adminCriarUsuario);
+  document.getElementById("btnAdminAddTransportadora")?.addEventListener("click", adminAddTransportadora);
+  document.getElementById("btnAdminAlterarResponsavel")?.addEventListener("click", adminAlterarResponsavel);
 
-  const modalFechar = document.getElementById("modalFechar");
-  if (modalFechar)
-    modalFechar.addEventListener("click", () => document.getElementById("modalAnexos").classList.remove("open"));
-
-  const modal = document.getElementById("modalAnexos");
-  if (modal)
-    modal.addEventListener("click", (e) => {
-      if (e.target.id === "modalAnexos") document.getElementById("modalAnexos").classList.remove("open");
-    });
-
-  // ✅ carrega tudo
-  carregarUsuarioLogado(); // perfil (e valida sessão)
-  carregarFaturas();
-  carregarHistorico();
+  // primeira carga
+  await carregarMe();
+  await carregarFaturas();
+  await carregarHistorico();
 });
