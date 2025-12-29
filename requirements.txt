@@ -5,3 +5,9 @@ psycopg2-binary
 python-multipart
 jinja2
 boto3
+
+# ====== AUTH / SEGURANÇA (NOVO) ======
+passlib[argon2]
+argon2-cffi
+python-jose
+itsdangerous
