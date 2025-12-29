@@ -588,7 +588,8 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="2.0.2")
+print("### MAIN.PY CARREGADO - VERSAO 2.0.1 AUTH OK ###")
+
 
 # middleware para mostrar erro real quando DEBUG=1
 @app.middleware("http")
