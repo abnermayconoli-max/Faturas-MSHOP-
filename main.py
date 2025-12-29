@@ -6,13 +6,10 @@ import json
 import hmac
 import hashlib
 import secrets
-import traceback
 from typing import List, Optional, Tuple
 
-raise RuntimeError("🔥 ESTE É O MAIN CERTO 🔥")
-
-
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 from fastapi import (
     FastAPI,
@@ -24,7 +21,7 @@ from fastapi import (
     Request,
     Form,
 )
-from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -50,14 +47,6 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 
-
-
-# =========================
-# CONFIG / FLAGS
-# =========================
-
-DEBUG = os.getenv("DEBUG", "0").strip() == "1"
-
 # =========================
 # CONFIG BANCO
 # =========================
@@ -71,8 +60,36 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # =========================
+# ✅ DETECTA PASTAS (static/templates vs estático/modelos)
+# =========================
+
+def pick_dir(*candidates: str) -> str:
+    for c in candidates:
+        if Path(c).exists() and Path(c).is_dir():
+            return c
+    return candidates[0]
+
+STATIC_DIR = pick_dir("static", "estático", "estatico")
+TEMPLATES_DIR = pick_dir("templates", "modelos")
+
+def pick_tpl(*candidates: str) -> str:
+    for c in candidates:
+        if (Path(TEMPLATES_DIR) / c).exists():
+            return c
+    return candidates[0]
+
+TPL_LOGIN  = pick_tpl("login.html")
+TPL_INDEX  = pick_tpl("index.html")
+TPL_ADMIN  = pick_tpl("admin.html")
+TPL_CHANGE = pick_tpl("change.html", "alterar_senha.html", "change_password.html")
+TPL_FORGOT = pick_tpl("forgot.html", "esqueci.html")
+TPL_RESET  = pick_tpl("reset.html")
+
+# =========================
 # CONFIG AUTH / SEGURANÇA
 # =========================
+
+DEBUG = os.getenv("DEBUG", "0").strip() == "1"
 
 SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("JWT_SECRET")
 if not SESSION_SECRET:
@@ -94,8 +111,13 @@ BOOTSTRAP_ADMIN_USER = os.getenv("BOOTSTRAP_ADMIN_USER", "").strip()
 BOOTSTRAP_ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
 BOOTSTRAP_ADMIN_EMAIL = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip() or None
 
+# Cookies seguros no HTTPS.
+# No Render é HTTPS, então secure=True ok.
+# Se você testar local com HTTP, deixe DEBUG=1 pra secure=False.
+COOKIE_SECURE = False if DEBUG else True
+
 # =========================
-# CONFIG R2 (OPCIONAL)
+# CONFIG R2
 # =========================
 
 R2_ENDPOINT = os.getenv("R2_ENDPOINT")
@@ -103,23 +125,23 @@ R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 
-R2_ENABLED = all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY])
-
-s3 = None
-if R2_ENABLED:
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-        region_name="auto",
-        config=Config(
-            signature_version="s3v4",
-            s3={"addressing_style": "path"},
-        ),
+if not all([R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY]):
+    raise RuntimeError(
+        "R2 não configurado. Verifique as env vars: "
+        "R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
     )
-else:
-    print("WARN: R2 NÃO configurado. Anexos (upload/download) ficarão desativados até configurar as env vars do R2.")
+
+s3 = boto3.client(
+    "s3",
+    endpoint_url=R2_ENDPOINT,
+    aws_access_key_id=R2_ACCESS_KEY_ID,
+    aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+    region_name="auto",
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "path"},
+    ),
+)
 
 def _r2_key(fatura_id: int, original_filename: str) -> str:
     safe_name = (original_filename or "arquivo").replace("/", "_").replace("\\", "_")
@@ -232,7 +254,7 @@ class PasswordResetDB(Base):
 Base.metadata.create_all(bind=engine)
 
 # =========================
-# ✅ MIGRAÇÃO AUTOMÁTICA
+# ✅ MIGRAÇÃO AUTOMÁTICA (Render)
 # =========================
 
 def ensure_schema():
@@ -313,7 +335,7 @@ def ensure_schema():
 ensure_schema()
 
 # =========================
-# RESPONSÁVEL (fallback)
+# RESPONSÁVEL (fallback antigo)
 # =========================
 
 RESP_MAP = {
@@ -415,7 +437,7 @@ def set_auth_cookies(resp: Response, user_id: int):
         sess,
         max_age=COOKIE_MAX_AGE_SECONDS,
         httponly=True,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="lax",
         path="/",
     )
@@ -424,7 +446,7 @@ def set_auth_cookies(resp: Response, user_id: int):
         csrf,
         max_age=CSRF_MAX_AGE_SECONDS,
         httponly=False,
-        secure=True,
+        secure=COOKIE_SECURE,
         samesite="lax",
         path="/",
     )
@@ -460,12 +482,23 @@ def get_session_csrf(request: Request) -> Optional[str]:
     return payload.get("csrf")
 
 def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
+    # ✅ melhora: se o HTML não mandar csrf, tenta usar o cookie (evita 400 “campo obrigatório”)
+    if not csrf_form_value:
+        csrf_form_value = request.cookies.get(CSRF_COOKIE)
+
     if not csrf_form_value:
         return False
+
     csrf_cookie = request.cookies.get(CSRF_COOKIE)
     csrf_session = get_session_csrf(request)
-    if not csrf_cookie or not csrf_session:
+
+    if not csrf_cookie:
         return False
+
+    # Se ainda não existe sessão (primeiro acesso), valida pelo cookie.
+    if not csrf_session:
+        return hmac.compare_digest(csrf_form_value, csrf_cookie)
+
     return hmac.compare_digest(csrf_form_value, csrf_cookie) and hmac.compare_digest(csrf_form_value, csrf_session)
 
 # =========================
@@ -506,6 +539,19 @@ class FaturaOut(FaturaBase):
     class Config:
         from_attributes = True
 
+class HistoricoPagamentoOut(BaseModel):
+    id: int
+    fatura_id: int
+    pago_em: datetime
+    transportadora: str
+    responsavel: Optional[str] = None
+    numero_fatura: str
+    valor: float
+    data_vencimento: date
+
+    class Config:
+        from_attributes = True
+
 # =========================
 # HELPERS FATURAS
 # =========================
@@ -534,7 +580,7 @@ def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
     )
 
 # =========================
-# STATUS AUTOMÁTICO
+# ✅ REGRA AUTOMÁTICA (atraso)
 # =========================
 
 def quarta_da_semana_atual(hoje: date) -> date:
@@ -556,7 +602,7 @@ def atualizar_status_automatico(db: Session):
         db.commit()
 
 # =========================
-# HISTÓRICO PAGAMENTO
+# ✅ HISTÓRICO DE PAGAMENTO
 # =========================
 
 def registrar_pagamento(db: Session, fatura: FaturaDB, responsavel_nome: Optional[str]):
@@ -578,7 +624,7 @@ def remover_historico_pagamento(db: Session, fatura_id: int):
     db.query(HistoricoPagamentoDB).filter(HistoricoPagamentoDB.fatura_id == fatura_id).delete(synchronize_session=False)
 
 # =========================
-# DB DEPENDENCY
+# DEPENDÊNCIA DB
 # =========================
 
 def get_db():
@@ -592,33 +638,14 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-print("### MAIN.PY CARREGADO - VERSAO 2.0.1 AUTH OK ###")
+app = FastAPI(title="Sistema de Faturas", version="2.0.2")
 
-
-# middleware para mostrar erro real quando DEBUG=1
-@app.middleware("http")
-async def debug_error_middleware(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception:
-        tb = traceback.format_exc()
-        print("INTERNAL ERROR:\n", tb)
-        if DEBUG:
-            return PlainTextResponse(tb, status_code=500)
-        return PlainTextResponse("Erro do Servidor Interno", status_code=500)
-
-# monta static/templates sem quebrar o boot se faltar pasta
-if os.path.isdir("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-else:
-    print("WARN: pasta 'static/' não encontrada. Front pode quebrar se templates referenciam arquivos estáticos.")
-
-templates = Jinja2Templates(directory="templates") if os.path.isdir("templates") else None
-if templates is None:
-    print("WARN: pasta 'templates/' não encontrada. Rotas HTML irão falhar até você subir a pasta templates no GitHub.")
+# ✅ usa a pasta detectada
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # =========================
-# BOOTSTRAP ADMIN
+# BOOTSTRAP ADMIN (ENV)
 # =========================
 
 def bootstrap_admin(db: Session):
@@ -638,7 +665,7 @@ def bootstrap_admin(db: Session):
             pwd_salt=salt,
             pwd_hash=pwd_hash,
             must_change_password=1,
-            password_expires_at=now,
+            password_expires_at=now,  # força troca
             created_at=now,
         )
         db.add(user)
@@ -665,15 +692,26 @@ def on_startup():
         db.close()
 
 # =========================
-# AUTH ROUTES
+# AUTH ROUTES / PAGES
 # =========================
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/"):
-    if templates is None:
-        return PlainTextResponse("Templates não encontrados no deploy. Suba a pasta /templates no GitHub.", status_code=500)
-    csrf_fake = secrets.token_urlsafe(16)
-    return templates.TemplateResponse("login.html", {"request": request, "csrf": csrf_fake, "next": next})
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    resp = templates.TemplateResponse(TPL_LOGIN, {"request": request, "csrf": csrf, "next": next})
+    if not csrf_cookie:
+        resp.set_cookie(
+            CSRF_COOKIE,
+            csrf,
+            max_age=CSRF_MAX_AGE_SECONDS,
+            httponly=False,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            path="/",
+        )
+    return resp
 
 @app.post("/login", response_class=HTMLResponse)
 def login_action(
@@ -684,16 +722,28 @@ def login_action(
     next: str = Form("/"),
     db: Session = Depends(get_db),
 ):
-    if templates is None:
-        return PlainTextResponse("Templates não encontrados no deploy. Suba a pasta /templates no GitHub.", status_code=500)
+    if not validate_csrf(request, csrf):
+        csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
+        resp = templates.TemplateResponse(
+            TPL_LOGIN,
+            {"request": request, "csrf": csrf_cookie, "next": next, "error": "Sessão expirada. Recarregue a página e tente novamente."},
+            status_code=400,
+        )
+        if not request.cookies.get(CSRF_COOKIE):
+            resp.set_cookie(CSRF_COOKIE, csrf_cookie, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=COOKIE_SECURE, samesite="lax", path="/")
+        return resp
 
     user = db.query(UserDB).filter(UserDB.username == username.strip()).first()
     if not user or not verify_password(password, getattr(user, "pwd_salt", None), getattr(user, "pwd_hash", None)):
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "csrf": secrets.token_urlsafe(16), "next": next, "error": "Usuário ou senha inválidos."},
+        csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
+        resp = templates.TemplateResponse(
+            TPL_LOGIN,
+            {"request": request, "csrf": csrf_cookie, "next": next, "error": "Usuário ou senha inválidos."},
             status_code=401,
         )
+        if not request.cookies.get(CSRF_COOKIE):
+            resp.set_cookie(CSRF_COOKIE, csrf_cookie, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=COOKIE_SECURE, samesite="lax", path="/")
+        return resp
 
     user.last_login_at = agora_br()
     db.commit()
@@ -713,16 +763,345 @@ def logout():
     clear_auth_cookies(resp)
     return resp
 
+@app.get("/change-password", response_class=HTMLResponse)
+def change_password_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login?next=/change-password", status_code=302)
+
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    resp = templates.TemplateResponse(TPL_CHANGE, {"request": request, "csrf": csrf})
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=COOKIE_SECURE, samesite="lax", path="/")
+    return resp
+
+@app.post("/change-password", response_class=HTMLResponse)
+def change_password_action(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    user = get_current_user(request, db)
+    if not user:
+        return RedirectResponse(url="/login?next=/change-password", status_code=302)
+
+    if not validate_csrf(request, csrf):
+        return templates.TemplateResponse(
+            TPL_CHANGE,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "error": "Sessão expirada. Recarregue a página e tente novamente."},
+            status_code=400,
+        )
+
+    if not verify_password(current_password, getattr(user, "pwd_salt", None), getattr(user, "pwd_hash", None)):
+        return templates.TemplateResponse(
+            TPL_CHANGE,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "error": "Senha atual incorreta."},
+            status_code=400,
+        )
+
+    if len(new_password) < 8:
+        return templates.TemplateResponse(
+            TPL_CHANGE,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "error": "A nova senha deve ter pelo menos 8 caracteres."},
+            status_code=400,
+        )
+
+    salt, pwd_hash = hash_password(new_password)
+    user.pwd_salt = salt
+    user.pwd_hash = pwd_hash
+
+    is_first = user.first_password_changed_at is None
+    now = agora_br()
+
+    if is_first:
+        user.first_password_changed_at = now
+
+    user.last_password_changed_at = now
+    user.must_change_password = 0
+    user.password_expires_at = compute_expiry(is_first_after_temp=is_first)
+
+    db.commit()
+    return RedirectResponse(url="/", status_code=302)
+
+@app.get("/forgot", response_class=HTMLResponse)
+def forgot_page(request: Request):
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    resp = templates.TemplateResponse(TPL_FORGOT, {"request": request, "csrf": csrf})
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=COOKIE_SECURE, samesite="lax", path="/")
+    return resp
+
+@app.post("/forgot", response_class=HTMLResponse)
+def forgot_action(
+    request: Request,
+    username_or_email: str = Form(...),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    if not validate_csrf(request, csrf):
+        return templates.TemplateResponse(
+            TPL_FORGOT,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "msg": "Sessão expirada. Recarregue e tente novamente."},
+            status_code=400,
+        )
+
+    val = username_or_email.strip()
+    user = db.query(UserDB).filter(UserDB.username == val).first()
+    if not user and val:
+        user = db.query(UserDB).filter(UserDB.email == val).first()
+
+    # msg genérica
+    if not user:
+        return templates.TemplateResponse(
+            TPL_FORGOT,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "msg": "Se existir, um link de redefinição foi gerado."},
+        )
+
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    reset = PasswordResetDB(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=agora_br() + timedelta(minutes=30),
+        used_at=None,
+    )
+    db.add(reset)
+    db.commit()
+
+    base_url = str(request.base_url).rstrip("/")
+    reset_link = f"{base_url}/reset?token={token}"
+
+    return templates.TemplateResponse(
+        TPL_FORGOT,
+        {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "msg": "Link gerado.", "reset_link": reset_link},
+    )
+
+@app.get("/reset", response_class=HTMLResponse)
+def reset_page(request: Request, token: str):
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    resp = templates.TemplateResponse(TPL_RESET, {"request": request, "csrf": csrf, "token": token})
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=COOKIE_SECURE, samesite="lax", path="/")
+    return resp
+
+@app.post("/reset", response_class=HTMLResponse)
+def reset_action(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    if not validate_csrf(request, csrf):
+        return templates.TemplateResponse(
+            TPL_RESET,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "token": token, "error": "Sessão expirada. Recarregue e tente novamente."},
+            status_code=400,
+        )
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    pr = db.query(PasswordResetDB).filter(PasswordResetDB.token_hash == token_hash).first()
+    if not pr or pr.used_at is not None or pr.expires_at < agora_br():
+        return templates.TemplateResponse(
+            TPL_RESET,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "token": token, "error": "Link inválido ou expirado."},
+            status_code=400,
+        )
+
+    user = db.query(UserDB).filter(UserDB.id == pr.user_id).first()
+    if not user:
+        return templates.TemplateResponse(
+            TPL_RESET,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "token": token, "error": "Usuário não encontrado."},
+            status_code=400,
+        )
+
+    if len(new_password) < 8:
+        return templates.TemplateResponse(
+            TPL_RESET,
+            {"request": request, "csrf": request.cookies.get(CSRF_COOKIE) or make_csrf_token(), "token": token, "error": "A nova senha deve ter pelo menos 8 caracteres."},
+            status_code=400,
+        )
+
+    salt, pwd_hash = hash_password(new_password)
+    user.pwd_salt = salt
+    user.pwd_hash = pwd_hash
+    user.must_change_password = 0
+    now = agora_br()
+    if user.first_password_changed_at is None:
+        user.first_password_changed_at = now
+    user.last_password_changed_at = now
+    user.password_expires_at = compute_expiry(is_first_after_temp=False)
+
+    pr.used_at = now
+    db.commit()
+
+    return RedirectResponse(url="/login", status_code=302)
+
+# =========================
+# PAGES PROTEGIDAS (HTML)
+# =========================
+
+def redirect_to_login(next_path: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
+
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return redirect_to_login("/")
+
+    if needs_password_change(user):
+        return RedirectResponse(url="/change-password", status_code=302)
+
+    return templates.TemplateResponse(TPL_INDEX, {"request": request})
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return redirect_to_login("/admin")
+    if needs_password_change(user):
+        return RedirectResponse(url="/change-password", status_code=302)
+    if (user.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    users = db.query(UserDB).order_by(UserDB.username.asc()).all()
+    trs = db.query(TransportadoraDB).order_by(TransportadoraDB.nome.asc()).all()
+    user_map = {u.id: u.username for u in users}
+
+    resp = templates.TemplateResponse(
+        TPL_ADMIN,
+        {"request": request, "csrf": csrf, "admin": user, "users": users, "trs": trs, "user_map": user_map},
+    )
+    if not csrf_cookie:
+        resp.set_cookie(CSRF_COOKIE, csrf, max_age=CSRF_MAX_AGE_SECONDS, httponly=False, secure=COOKIE_SECURE, samesite="lax", path="/")
+    return resp
+
+@app.post("/admin/user/create", response_class=HTMLResponse)
+def admin_create_user(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(""),
+    role: str = Form("user"),
+    temp_password: str = Form(...),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    admin = get_current_user(request, db)
+    if not admin:
+        return redirect_to_login("/admin")
+    if (admin.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    if not validate_csrf(request, csrf):
+        return RedirectResponse(url="/admin", status_code=302)
+
+    username = username.strip()
+    if not username:
+        return RedirectResponse(url="/admin", status_code=302)
+
+    exists = db.query(UserDB).filter(UserDB.username == username).first()
+    if exists:
+        return RedirectResponse(url="/admin", status_code=302)
+
+    salt, pwd_hash = hash_password(temp_password)
+
+    u = UserDB(
+        username=username,
+        email=(email.strip() or None),
+        role=("admin" if role == "admin" else "user"),
+        pwd_salt=salt,
+        pwd_hash=pwd_hash,
+        must_change_password=1,
+        password_expires_at=agora_br(),
+        created_at=agora_br(),
+    )
+    db.add(u)
+    db.commit()
+    return RedirectResponse(url="/admin", status_code=302)
+
+@app.post("/admin/transportadora/create", response_class=HTMLResponse)
+def admin_create_transportadora(
+    request: Request,
+    nome: str = Form(...),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    admin = get_current_user(request, db)
+    if not admin:
+        return redirect_to_login("/admin")
+    if (admin.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    if not validate_csrf(request, csrf):
+        return RedirectResponse(url="/admin", status_code=302)
+
+    nome = nome.strip()
+    if not nome:
+        return RedirectResponse(url="/admin", status_code=302)
+
+    exists = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome)).first()
+    if not exists:
+        db.add(TransportadoraDB(nome=nome))
+        db.commit()
+
+    return RedirectResponse(url="/admin", status_code=302)
+
+@app.post("/admin/transportadora/assign", response_class=HTMLResponse)
+def admin_assign_transportadora(
+    request: Request,
+    transportadora_id: int = Form(...),
+    responsavel_user_id: str = Form(""),
+    csrf: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    admin = get_current_user(request, db)
+    if not admin:
+        return redirect_to_login("/admin")
+    if (admin.role or "").lower() != "admin":
+        return RedirectResponse(url="/", status_code=302)
+    if not validate_csrf(request, csrf):
+        return RedirectResponse(url="/admin", status_code=302)
+
+    tr = db.query(TransportadoraDB).filter(TransportadoraDB.id == transportadora_id).first()
+    if not tr:
+        return RedirectResponse(url="/admin", status_code=302)
+
+    if responsavel_user_id.strip() == "":
+        tr.responsavel_user_id = None
+    else:
+        try:
+            uid = int(responsavel_user_id)
+            u = db.query(UserDB).filter(UserDB.id == uid).first()
+            if u:
+                tr.responsavel_user_id = u.id
+        except Exception:
+            pass
+
+    db.commit()
+    return RedirectResponse(url="/admin", status_code=302)
+
 # =========================
 # HEALTH
 # =========================
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "r2_enabled": bool(R2_ENABLED), "debug": bool(DEBUG)}
+    return {"status": "ok", "static_dir": STATIC_DIR, "templates_dir": TEMPLATES_DIR, "debug": DEBUG}
 
 # =========================
-# AUTH GUARD API
+# FATURAS (API) - protegidas
 # =========================
 
 def api_require_auth(request: Request, db: Session):
@@ -732,10 +1111,6 @@ def api_require_auth(request: Request, db: Session):
     if needs_password_change(u):
         raise HTTPException(status_code=403, detail="Troca de senha necessária")
     return u
-
-# =========================
-# FATURAS (API)
-# =========================
 
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(get_db)):
@@ -749,6 +1124,10 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
         status=fatura.status,
         observacao=fatura.observacao,
     )
+
+    if (fatura.status or "").lower() == "pago":
+        resp_nome = get_responsavel(db, db_fatura.transportadora)
+        registrar_pagamento(db, db_fatura, resp_nome)
 
     db.add(db_fatura)
     db.commit()
@@ -792,8 +1171,56 @@ def listar_faturas(
     faturas_db = query.order_by(FaturaDB.id).all()
     return [fatura_to_out(db, f) for f in faturas_db]
 
+@app.put("/faturas/{fatura_id}", response_model=FaturaOut)
+def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: Session = Depends(get_db)):
+    api_require_auth(request, db)
+
+    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
+    if not fatura:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+
+    status_antigo = (fatura.status or "").lower()
+
+    data = dados.dict(exclude_unset=True)
+    for campo, valor in data.items():
+        setattr(fatura, campo, valor)
+
+    status_novo = (fatura.status or "").lower()
+
+    if status_antigo != "pago" and status_novo == "pago":
+        resp_nome = get_responsavel(db, fatura.transportadora)
+        registrar_pagamento(db, fatura, resp_nome)
+
+    if status_antigo == "pago" and status_novo != "pago":
+        remover_historico_pagamento(db, fatura.id)
+        fatura.data_pagamento = None
+
+    db.commit()
+    db.refresh(fatura)
+    return fatura_to_out(db, fatura)
+
+@app.delete("/faturas/{fatura_id}")
+def deletar_fatura(fatura_id: int, request: Request, db: Session = Depends(get_db)):
+    api_require_auth(request, db)
+
+    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
+    if not fatura:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+
+    for anexo in fatura.anexos:
+        try:
+            s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+        except ClientError as e:
+            print("ERRO AO APAGAR NO R2:", repr(e))
+
+    remover_historico_pagamento(db, fatura.id)
+
+    db.delete(fatura)
+    db.commit()
+    return {"ok": True}
+
 # =========================
-# ANEXOS (com bloqueio se R2 não estiver configurado)
+# ANEXOS
 # =========================
 
 @app.post("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
@@ -804,9 +1231,6 @@ async def upload_anexos(
     db: Session = Depends(get_db),
 ):
     api_require_auth(request, db)
-
-    if not R2_ENABLED or s3 is None:
-        raise HTTPException(status_code=503, detail="R2 não configurado no Render. Configure R2_* nas variáveis de ambiente.")
 
     fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
     if not fatura:
@@ -848,3 +1272,193 @@ async def upload_anexos(
 
     db.commit()
     return anexos_criados
+
+@app.get("/faturas/{fatura_id}/anexos", response_model=List[AnexoOut])
+def listar_anexos(fatura_id: int, request: Request, db: Session = Depends(get_db)):
+    api_require_auth(request, db)
+
+    fatura = db.query(FaturaDB).filter(FaturaDB.id == fatura_id).first()
+    if not fatura:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+    return fatura.anexos
+
+@app.get("/anexos/{anexo_id}")
+def baixar_anexo(anexo_id: int, request: Request, db: Session = Depends(get_db)):
+    api_require_auth(request, db)
+
+    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
+    if not anexo:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+
+    try:
+        obj = s3.get_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+        body = obj["Body"]
+        content_type = obj.get("ContentType") or anexo.content_type or "application/octet-stream"
+    except ClientError as e:
+        print("ERRO DOWNLOAD R2:", repr(e))
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado no R2")
+
+    headers = {"Content-Disposition": f'attachment; filename="{anexo.original_name}"'}
+    return StreamingResponse(body, media_type=content_type, headers=headers)
+
+@app.delete("/anexos/{anexo_id}")
+def deletar_anexo(anexo_id: int, request: Request, db: Session = Depends(get_db)):
+    api_require_auth(request, db)
+
+    anexo = db.query(AnexoDB).filter(AnexoDB.id == anexo_id).first()
+    if not anexo:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+
+    try:
+        s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
+    except ClientError as e:
+        print("ERRO AO APAGAR NO R2:", repr(e))
+
+    db.delete(anexo)
+    db.commit()
+    return {"ok": True}
+
+# =========================
+# DASHBOARD
+# =========================
+
+@app.get("/dashboard/resumo")
+def resumo_dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+    ate_vencimento: Optional[str] = Query(None),
+    de_vencimento: Optional[str] = Query(None),
+):
+    api_require_auth(request, db)
+    atualizar_status_automatico(db)
+
+    hoje = hoje_local_br()
+    corte = quarta_da_semana_atual(hoje)
+
+    query_base = db.query(FaturaDB)
+
+    if transportadora:
+        query_base = query_base.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
+
+    if de_vencimento:
+        try:
+            data_de = datetime.strptime(de_vencimento, "%Y-%m-%d").date()
+            query_base = query_base.filter(FaturaDB.data_vencimento >= data_de)
+        except ValueError:
+            pass
+
+    if ate_vencimento:
+        try:
+            data_ate = datetime.strptime(ate_vencimento, "%Y-%m-%d").date()
+            query_base = query_base.filter(FaturaDB.data_vencimento <= data_ate)
+        except ValueError:
+            pass
+
+    total_pago = (
+        query_base.filter(FaturaDB.status.ilike("pago"))
+        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
+        .scalar()
+    )
+
+    total_atrasado = (
+        query_base.filter(
+            or_(
+                FaturaDB.status.ilike("atrasado"),
+                and_(
+                    FaturaDB.status.ilike("pendente"),
+                    FaturaDB.data_vencimento <= corte,
+                ),
+            )
+        )
+        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
+        .scalar()
+    )
+
+    total_em_dia = (
+        query_base.filter(
+            and_(
+                FaturaDB.status.ilike("pendente"),
+                FaturaDB.data_vencimento > corte,
+            )
+        )
+        .with_entities(func.coalesce(func.sum(FaturaDB.valor), 0))
+        .scalar()
+    )
+
+    total_geral = float(total_atrasado or 0) + float(total_em_dia or 0)
+
+    return {
+        "total_geral": float(total_geral),
+        "total_em_dia": float(total_em_dia or 0),
+        "total_atrasado": float(total_atrasado or 0),
+        "total_pago": float(total_pago or 0),
+    }
+
+# =========================
+# EXPORT CSV
+# =========================
+
+@app.get("/faturas/exportar")
+def exportar_faturas(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+    numero_fatura: Optional[str] = Query(None),
+):
+    api_require_auth(request, db)
+    atualizar_status_automatico(db)
+
+    import csv
+    import io
+
+    query = db.query(FaturaDB)
+    if transportadora:
+        query = query.filter(FaturaDB.transportadora.ilike(f"%{transportadora}%"))
+    if numero_fatura:
+        query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
+
+    faturas = query.order_by(FaturaDB.id).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
+
+    writer.writerow(
+        [
+            "ID",
+            "Transportadora",
+            "Responsável",
+            "Número Fatura",
+            "Valor",
+            "Data Vencimento",
+            "Status",
+            "Data Pagamento (BR)",
+            "Observação",
+        ]
+    )
+
+    for f in faturas:
+        pago_em = ""
+        if f.data_pagamento:
+            try:
+                pago_em = f.data_pagamento.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                pago_em = str(f.data_pagamento)
+
+        writer.writerow(
+            [
+                f.id,
+                f.transportadora,
+                get_responsavel(db, f.transportadora) or "",
+                str(f.numero_fatura),
+                float(f.valor or 0),
+                f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
+                f.status,
+                pago_em,
+                f.observacao or "",
+            ]
+        )
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    headers = {"Content-Disposition": 'attachment; filename="faturas.csv"'}
+    return Response(csv_bytes, media_type="text/csv", headers=headers)
