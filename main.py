@@ -6,7 +6,7 @@ import json
 import hmac
 import hashlib
 import secrets
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple
 
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -78,13 +78,12 @@ def pick_tpl(*candidates: str) -> str:
             return c
     return candidates[0]
 
-TPL_LOGIN   = pick_tpl("login.html")
-TPL_INDEX   = pick_tpl("index.html")
-TPL_ADMIN   = pick_tpl("admin.html")
-TPL_CHANGE  = pick_tpl("change.html", "alterar_senha.html", "change_password.html")
-TPL_FORGOT  = pick_tpl("forgot.html", "esqueci.html")
-TPL_RESET   = pick_tpl("reset.html")
-TPL_PROFILE = pick_tpl("profile.html", "perfil.html")  # ✅ NOVO
+TPL_LOGIN  = pick_tpl("login.html")
+TPL_INDEX  = pick_tpl("index.html")
+TPL_ADMIN  = pick_tpl("admin.html")
+TPL_CHANGE = pick_tpl("change.html", "alterar_senha.html", "change_password.html", "alterar_senha.html")
+TPL_FORGOT = pick_tpl("forgot.html", "esqueci.html", "esqueci.html")
+TPL_RESET  = pick_tpl("reset.html")
 
 # =========================
 # CONFIG AUTH / SEGURANÇA
@@ -113,21 +112,6 @@ BOOTSTRAP_ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
 BOOTSTRAP_ADMIN_EMAIL = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip() or None
 
 COOKIE_SECURE = False if DEBUG else True
-
-# =========================
-# ✅ PERFORMANCE: throttle do status automático
-# =========================
-
-STATUS_UPDATE_MIN_SECONDS = int(os.getenv("STATUS_UPDATE_MIN_SECONDS", "120"))
-_last_status_update_ts: float = 0.0
-
-def should_run_status_update() -> bool:
-    global _last_status_update_ts
-    now_ts = datetime.utcnow().timestamp()
-    if (now_ts - _last_status_update_ts) < STATUS_UPDATE_MIN_SECONDS:
-        return False
-    _last_status_update_ts = now_ts
-    return True
 
 # =========================
 # CONFIG R2
@@ -186,7 +170,6 @@ class FaturaDB(Base):
     data_vencimento = Column(Date)
     status = Column(String, default="pendente")
     observacao = Column(String, nullable=True)
-
     data_pagamento = Column(DateTime(timezone=True), nullable=True)
 
     anexos = relationship(
@@ -201,8 +184,8 @@ class AnexoDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    filename = Column(String)
-    original_name = Column(String)
+    filename = Column(String)       # KEY do R2
+    original_name = Column(String)  # nome original
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
@@ -235,8 +218,8 @@ class UserDB(Base):
 
     role = Column(String, default="user")  # admin/user
 
-    pwd_salt = Column(String, nullable=False)
-    pwd_hash = Column(String, nullable=False)
+    pwd_salt = Column(String, nullable=True)
+    pwd_hash = Column(String, nullable=True)
 
     must_change_password = Column(Integer, default=1)
     first_password_changed_at = Column(DateTime(timezone=True), nullable=True)
@@ -272,6 +255,8 @@ Base.metadata.create_all(bind=engine)
 
 def ensure_schema():
     with engine.begin() as conn:
+        # --- faturas
+        conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS observacao TEXT;"))
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMPTZ;"))
         try:
             conn.execute(text("""
@@ -282,6 +267,20 @@ def ensure_schema():
         except Exception as e:
             print("WARN schema: alter faturas.data_pagamento -> timestamptz:", repr(e))
 
+        # --- anexos
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS anexos (
+                id SERIAL PRIMARY KEY,
+                fatura_id INTEGER REFERENCES faturas(id) ON DELETE CASCADE,
+                filename TEXT,
+                original_name TEXT,
+                content_type TEXT,
+                criado_em DATE DEFAULT CURRENT_DATE
+            );
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_anexos_fatura_id ON anexos(fatura_id);"))
+
+        # --- historico_pagamentos
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS historico_pagamentos (
                 id SERIAL PRIMARY KEY,
@@ -295,7 +294,16 @@ def ensure_schema():
             );
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_historico_pagamentos_fatura_id ON historico_pagamentos(fatura_id);"))
+        try:
+            conn.execute(text("""
+                ALTER TABLE historico_pagamentos
+                ALTER COLUMN pago_em TYPE TIMESTAMPTZ
+                USING (pago_em AT TIME ZONE 'UTC');
+            """))
+        except Exception as e:
+            print("WARN schema: alter historico_pagamentos.pago_em -> timestamptz:", repr(e))
 
+        # --- users (garante existência e colunas)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -306,8 +314,10 @@ def ensure_schema():
 
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';"))
+
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_salt TEXT;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_hash TEXT;"))
+
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 1;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_password_changed_at TIMESTAMPTZ;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_password_changed_at TIMESTAMPTZ;"))
@@ -315,15 +325,38 @@ def ensure_schema():
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;"))
 
+        # --- transportadoras (CRIA e também ALTERA se já existia sem coluna)
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS transportadoras (
                 id SERIAL PRIMARY KEY,
-                nome TEXT UNIQUE NOT NULL,
-                responsavel_user_id INTEGER REFERENCES users(id)
+                nome TEXT UNIQUE NOT NULL
             );
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transportadoras_nome ON transportadoras(nome);"))
 
+        # ✅ ESSA É A CORREÇÃO DO SEU ERRO (coluna não existia)
+        conn.execute(text("ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS responsavel_user_id INTEGER;"))
+
+        # tenta criar FK (se já existir, ignora)
+        try:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conname = 'transportadoras_responsavel_user_id_fkey'
+                    ) THEN
+                        ALTER TABLE transportadoras
+                        ADD CONSTRAINT transportadoras_responsavel_user_id_fkey
+                        FOREIGN KEY (responsavel_user_id) REFERENCES users(id);
+                    END IF;
+                END $$;
+            """))
+        except Exception as e:
+            print("WARN schema: FK transportadoras.responsavel_user_id -> users(id):", repr(e))
+
+        # --- password_resets
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS password_resets (
                 id SERIAL PRIMARY KEY,
@@ -352,28 +385,12 @@ RESP_MAP = {
 }
 
 def get_responsavel_fallback(transportadora: str) -> Optional[str]:
+    if not transportadora:
+        return None
     if transportadora in RESP_MAP:
         return RESP_MAP[transportadora]
     base = transportadora.split("-")[0].strip()
     return RESP_MAP.get(base)
-
-def build_responsavel_cache(db: Session) -> Dict[str, str]:
-    cache: Dict[str, str] = {}
-    try:
-        rows = (
-            db.query(TransportadoraDB, UserDB)
-            .outerjoin(UserDB, TransportadoraDB.responsavel_user_id == UserDB.id)
-            .all()
-        )
-        for tr, u in rows:
-            nome = (tr.nome or "").strip()
-            if not nome:
-                continue
-            if u and u.username:
-                cache[nome.lower()] = u.username
-    except Exception as e:
-        print("WARN build_responsavel_cache:", repr(e))
-    return cache
 
 # =========================
 # AUTH HELPERS
@@ -575,25 +592,17 @@ class HistoricoPagamentoOut(BaseModel):
 # HELPERS FATURAS
 # =========================
 
-def get_responsavel(db: Session, transportadora: str, cache: Optional[Dict[str, str]] = None) -> Optional[str]:
-    if not transportadora:
-        return None
-
-    nome_base = transportadora.split("-")[0].strip()
-    key = nome_base.lower()
-
-    if cache is not None and key in cache:
-        return cache[key]
-
-    tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
-    if tr and tr.responsavel_user_id:
-        u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
-        if u:
-            return u.username
-
+def get_responsavel(db: Session, transportadora: str) -> Optional[str]:
+    if transportadora:
+        nome_base = transportadora.split("-")[0].strip()
+        tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
+        if tr and tr.responsavel_user_id:
+            u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
+            if u:
+                return u.username
     return get_responsavel_fallback(transportadora)
 
-def fatura_to_out(db: Session, f: FaturaDB, cache: Optional[Dict[str, str]] = None) -> FaturaOut:
+def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
     return FaturaOut(
         id=f.id,
         transportadora=f.transportadora,
@@ -602,7 +611,7 @@ def fatura_to_out(db: Session, f: FaturaDB, cache: Optional[Dict[str, str]] = No
         data_vencimento=f.data_vencimento,
         status=f.status,
         observacao=f.observacao,
-        responsavel=get_responsavel(db, f.transportadora, cache=cache),
+        responsavel=get_responsavel(db, f.transportadora),
         data_pagamento=f.data_pagamento,
     )
 
@@ -615,9 +624,6 @@ def quarta_da_semana_atual(hoje: date) -> date:
     return monday + timedelta(days=2)
 
 def atualizar_status_automatico(db: Session):
-    if not should_run_status_update():
-        return
-
     hoje = hoje_local_br()
     corte = quarta_da_semana_atual(hoje)
 
@@ -668,7 +674,7 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="2.0.4")
+app = FastAPI(title="Sistema de Faturas", version="2.0.3")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -694,7 +700,7 @@ def bootstrap_admin(db: Session):
             pwd_salt=salt,
             pwd_hash=pwd_hash,
             must_change_password=1,
-            password_expires_at=now,
+            password_expires_at=now,  # força troca
             created_at=now,
         )
         db.add(user)
@@ -719,22 +725,6 @@ def on_startup():
         bootstrap_admin(db)
     finally:
         db.close()
-
-# =========================
-# HELPERS DE PÁGINA
-# =========================
-
-def redirect_to_login(next_path: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
-
-def require_page_auth(request: Request, db: Session) -> UserDB:
-    user = get_current_user(request, db)
-    if not user:
-        raise HTTPException(status_code=401)
-    if needs_password_change(user):
-        # força trocar senha antes de navegar
-        raise HTTPException(status_code=403)
-    return user
 
 # =========================
 # AUTH ROUTES / PAGES
@@ -793,13 +783,14 @@ def login_action(
     user.last_login_at = agora_br()
     db.commit()
 
+    resp = RedirectResponse(url=next or "/", status_code=302)
+    set_auth_cookies(resp, user.id)
+
     if needs_password_change(user):
         resp = RedirectResponse(url="/change-password", status_code=302)
         set_auth_cookies(resp, user.id)
         return resp
 
-    resp = RedirectResponse(url=next or "/", status_code=302)
-    set_auth_cookies(resp, user.id)
     return resp
 
 @app.get("/logout")
@@ -995,6 +986,9 @@ def reset_action(
 # PAGES PROTEGIDAS (HTML)
 # =========================
 
+def redirect_to_login(next_path: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
@@ -1004,58 +998,7 @@ def home(request: Request, db: Session = Depends(get_db)):
     if needs_password_change(user):
         return RedirectResponse(url="/change-password", status_code=302)
 
-    # ✅ manda user para o template (pra você poder mostrar Perfil / Sair / Admin no menu)
-    return templates.TemplateResponse(
-        TPL_INDEX,
-        {"request": request, "user": user, "is_admin": (user.role or "").lower() == "admin"},
-    )
-
-@app.get("/perfil", response_class=HTMLResponse)
-def perfil_page(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
-    if not user:
-        return redirect_to_login("/perfil")
-    if needs_password_change(user):
-        return RedirectResponse(url="/change-password", status_code=302)
-
-    csrf_cookie = request.cookies.get(CSRF_COOKIE)
-    csrf = csrf_cookie or make_csrf_token()
-
-    is_admin = (user.role or "").lower() == "admin"
-
-    users = []
-    trs = []
-    user_map = {}
-    if is_admin:
-        users = db.query(UserDB).order_by(UserDB.username.asc()).all()
-        trs = db.query(TransportadoraDB).order_by(TransportadoraDB.nome.asc()).all()
-        user_map = {u.id: u.username for u in users}
-
-    resp = templates.TemplateResponse(
-        TPL_PROFILE,
-        {
-            "request": request,
-            "user": user,
-            "is_admin": is_admin,
-            "csrf": csrf,
-            "users": users,
-            "trs": trs,
-            "user_map": user_map,
-        },
-    )
-
-    if not csrf_cookie:
-        resp.set_cookie(
-            CSRF_COOKIE,
-            csrf,
-            max_age=CSRF_MAX_AGE_SECONDS,
-            httponly=False,
-            secure=COOKIE_SECURE,
-            samesite="lax",
-            path="/",
-        )
-
-    return resp
+    return templates.TemplateResponse(TPL_INDEX, {"request": request})
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
@@ -1098,15 +1041,15 @@ def admin_create_user(
     if (admin.role or "").lower() != "admin":
         return RedirectResponse(url="/", status_code=302)
     if not validate_csrf(request, csrf):
-        return RedirectResponse(url="/perfil", status_code=302)  # ✅ volta pro perfil
+        return RedirectResponse(url="/admin", status_code=302)
 
     username = username.strip()
     if not username:
-        return RedirectResponse(url="/perfil", status_code=302)
+        return RedirectResponse(url="/admin", status_code=302)
 
     exists = db.query(UserDB).filter(UserDB.username == username).first()
     if exists:
-        return RedirectResponse(url="/perfil", status_code=302)
+        return RedirectResponse(url="/admin", status_code=302)
 
     salt, pwd_hash = hash_password(temp_password)
 
@@ -1122,7 +1065,7 @@ def admin_create_user(
     )
     db.add(u)
     db.commit()
-    return RedirectResponse(url="/perfil", status_code=302)
+    return RedirectResponse(url="/admin", status_code=302)
 
 @app.post("/admin/transportadora/create", response_class=HTMLResponse)
 def admin_create_transportadora(
@@ -1137,18 +1080,18 @@ def admin_create_transportadora(
     if (admin.role or "").lower() != "admin":
         return RedirectResponse(url="/", status_code=302)
     if not validate_csrf(request, csrf):
-        return RedirectResponse(url="/perfil", status_code=302)
+        return RedirectResponse(url="/admin", status_code=302)
 
     nome = nome.strip()
     if not nome:
-        return RedirectResponse(url="/perfil", status_code=302)
+        return RedirectResponse(url="/admin", status_code=302)
 
     exists = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome)).first()
     if not exists:
         db.add(TransportadoraDB(nome=nome))
         db.commit()
 
-    return RedirectResponse(url="/perfil", status_code=302)
+    return RedirectResponse(url="/admin", status_code=302)
 
 @app.post("/admin/transportadora/assign", response_class=HTMLResponse)
 def admin_assign_transportadora(
@@ -1164,11 +1107,11 @@ def admin_assign_transportadora(
     if (admin.role or "").lower() != "admin":
         return RedirectResponse(url="/", status_code=302)
     if not validate_csrf(request, csrf):
-        return RedirectResponse(url="/perfil", status_code=302)
+        return RedirectResponse(url="/admin", status_code=302)
 
     tr = db.query(TransportadoraDB).filter(TransportadoraDB.id == transportadora_id).first()
     if not tr:
-        return RedirectResponse(url="/perfil", status_code=302)
+        return RedirectResponse(url="/admin", status_code=302)
 
     if responsavel_user_id.strip() == "":
         tr.responsavel_user_id = None
@@ -1182,7 +1125,7 @@ def admin_assign_transportadora(
             pass
 
     db.commit()
-    return RedirectResponse(url="/perfil", status_code=302)
+    return RedirectResponse(url="/admin", status_code=302)
 
 # =========================
 # HEALTH
@@ -1190,26 +1133,28 @@ def admin_assign_transportadora(
 
 @app.get("/health")
 def health_check():
-    return {
-        "status": "ok",
-        "static_dir": STATIC_DIR,
-        "templates_dir": TEMPLATES_DIR,
-        "debug": DEBUG,
-        "status_update_min_seconds": STATUS_UPDATE_MIN_SECONDS,
-        "has_profile_template": True,
-    }
+    return {"status": "ok", "static_dir": STATIC_DIR, "templates_dir": TEMPLATES_DIR, "debug": DEBUG}
 
 # =========================
-# FATURAS (API) - protegidas
+# API AUTH
 # =========================
 
-def api_require_auth(request: Request, db: Session):
+def api_require_auth(request: Request, db: Session) -> UserDB:
     u = get_current_user(request, db)
     if not u:
         raise HTTPException(status_code=401, detail="Não autenticado")
     if needs_password_change(u):
         raise HTTPException(status_code=403, detail="Troca de senha necessária")
     return u
+
+@app.get("/me")
+def me(request: Request, db: Session = Depends(get_db)):
+    u = api_require_auth(request, db)
+    return {"id": u.id, "username": u.username, "email": u.email, "role": u.role}
+
+# =========================
+# FATURAS (API)
+# =========================
 
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(get_db)):
@@ -1224,50 +1169,16 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
         observacao=fatura.observacao,
     )
 
+    db.add(db_fatura)
+    db.flush()  # garante ID antes de registrar histórico
+
     if (fatura.status or "").lower() == "pago":
-        resp_nome = get_responsavel(db, db_fatura.transportadora, cache=None)
+        resp_nome = get_responsavel(db, db_fatura.transportadora)
         registrar_pagamento(db, db_fatura, resp_nome)
 
-    db.add(db_fatura)
     db.commit()
     db.refresh(db_fatura)
-    return fatura_to_out(db, db_fatura, cache=None)
-
-@app.get("/historico", response_model=List[HistoricoPagamentoOut])
-def listar_historico(
-    request: Request,
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-    de: Optional[str] = Query(None),
-    ate: Optional[str] = Query(None),
-    numero_fatura: Optional[str] = Query(None),
-):
-    api_require_auth(request, db)
-
-    q = db.query(HistoricoPagamentoDB)
-
-    if transportadora:
-        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
-
-    if numero_fatura:
-        q = q.filter(HistoricoPagamentoDB.numero_fatura.ilike(f"%{numero_fatura}%"))
-
-    if de:
-        try:
-            d1 = datetime.strptime(de, "%Y-%m-%d").date()
-            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) >= d1)
-        except ValueError:
-            pass
-
-    if ate:
-        try:
-            d2 = datetime.strptime(ate, "%Y-%m-%d").date()
-            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) <= d2)
-        except ValueError:
-            pass
-
-    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
-    return itens
+    return fatura_to_out(db, db_fatura)
 
 @app.get("/faturas", response_model=List[FaturaOut])
 def listar_faturas(
@@ -1303,9 +1214,8 @@ def listar_faturas(
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
-    faturas_db = query.order_by(FaturaDB.id).all()
-    cache = build_responsavel_cache(db)
-    return [fatura_to_out(db, f, cache=cache) for f in faturas_db]
+    faturas_db = query.order_by(FaturaDB.id.desc()).all()
+    return [fatura_to_out(db, f) for f in faturas_db]
 
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
 def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: Session = Depends(get_db)):
@@ -1324,7 +1234,7 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: 
     status_novo = (fatura.status or "").lower()
 
     if status_antigo != "pago" and status_novo == "pago":
-        resp_nome = get_responsavel(db, fatura.transportadora, cache=None)
+        resp_nome = get_responsavel(db, fatura.transportadora)
         registrar_pagamento(db, fatura, resp_nome)
 
     if status_antigo == "pago" and status_novo != "pago":
@@ -1333,8 +1243,7 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: 
 
     db.commit()
     db.refresh(fatura)
-    cache = build_responsavel_cache(db)
-    return fatura_to_out(db, fatura, cache=cache)
+    return fatura_to_out(db, fatura)
 
 @app.delete("/faturas/{fatura_id}")
 def deletar_fatura(fatura_id: int, request: Request, db: Session = Depends(get_db)):
@@ -1344,7 +1253,7 @@ def deletar_fatura(fatura_id: int, request: Request, db: Session = Depends(get_d
     if not fatura:
         raise HTTPException(status_code=404, detail="Fatura não encontrada")
 
-    for anexo in fatura.anexos:
+    for anexo in list(fatura.anexos or []):
         try:
             s3.delete_object(Bucket=R2_BUCKET_NAME, Key=anexo.filename)
         except ClientError as e:
@@ -1396,7 +1305,10 @@ async def upload_anexos(
                 detail=f"Erro ao enviar anexo para o R2: {code} - {msg}".strip(" -")
             )
         finally:
-            await file.close()
+            try:
+                await file.close()
+            except Exception:
+                pass
 
         anexo_db = AnexoDB(
             fatura_id=fatura_id,
@@ -1533,6 +1445,65 @@ def resumo_dashboard(
     }
 
 # =========================
+# HISTÓRICO (API)
+# =========================
+
+@app.get("/historico", response_model=List[HistoricoPagamentoOut])
+def listar_historico(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+    de: Optional[str] = Query(None),   # yyyy-mm-dd
+    ate: Optional[str] = Query(None),  # yyyy-mm-dd
+    numero_fatura: Optional[str] = Query(None),
+):
+    api_require_auth(request, db)
+
+    q = db.query(HistoricoPagamentoDB)
+
+    if transportadora:
+        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
+
+    if numero_fatura:
+        q = q.filter(HistoricoPagamentoDB.numero_fatura.ilike(f"%{numero_fatura}%"))
+
+    if de:
+        try:
+            d1 = datetime.strptime(de, "%Y-%m-%d").date()
+            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) >= d1)
+        except ValueError:
+            pass
+
+    if ate:
+        try:
+            d2 = datetime.strptime(ate, "%Y-%m-%d").date()
+            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) <= d2)
+        except ValueError:
+            pass
+
+    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
+    return itens
+
+# ✅ ALIAS para seu app.js (ele chama /historico_pagamentos)
+@app.get("/historico_pagamentos", response_model=List[HistoricoPagamentoOut])
+def listar_historico_alias(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+    de: Optional[str] = Query(None),
+    ate: Optional[str] = Query(None),
+    numero_fatura: Optional[str] = Query(None),
+):
+    return listar_historico(
+        request=request,
+        db=db,
+        transportadora=transportadora,
+        de=de,
+        ate=ate,
+        numero_fatura=numero_fatura,
+    )
+
+# =========================
 # EXPORT CSV
 # =========================
 
@@ -1555,8 +1526,7 @@ def exportar_faturas(
     if numero_fatura:
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
-    faturas = query.order_by(FaturaDB.id).all()
-    cache = build_responsavel_cache(db)
+    faturas = query.order_by(FaturaDB.id.desc()).all()
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
@@ -1587,7 +1557,7 @@ def exportar_faturas(
             [
                 f.id,
                 f.transportadora,
-                get_responsavel(db, f.transportadora, cache=cache) or "",
+                get_responsavel(db, f.transportadora) or "",
                 str(f.numero_fatura),
                 float(f.valor or 0),
                 f.data_vencimento.strftime("%d/%m/%Y") if f.data_vencimento else "",
@@ -1600,3 +1570,56 @@ def exportar_faturas(
     csv_bytes = output.getvalue().encode("utf-8-sig")
     headers = {"Content-Disposition": 'attachment; filename="faturas.csv"'}
     return Response(csv_bytes, media_type="text/csv", headers=headers)
+
+@app.get("/historico/exportar")
+def exportar_historico(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+):
+    api_require_auth(request, db)
+
+    import csv
+    import io
+
+    q = db.query(HistoricoPagamentoDB)
+    if transportadora:
+        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
+
+    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
+
+    writer.writerow(["ID Hist", "ID Fatura", "Transportadora", "Responsável", "Número Fatura", "Valor", "Vencimento", "Pago em (BR)"])
+
+    for it in itens:
+        pago_em = ""
+        try:
+            pago_em = it.pago_em.astimezone(BR_TZ).strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            pago_em = str(it.pago_em)
+
+        writer.writerow([
+            it.id,
+            it.fatura_id,
+            it.transportadora,
+            it.responsavel or "",
+            it.numero_fatura,
+            float(it.valor or 0),
+            it.data_vencimento.strftime("%d/%m/%Y") if it.data_vencimento else "",
+            pago_em
+        ])
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    headers = {"Content-Disposition": 'attachment; filename="historico_pagamentos.csv"'}
+    return Response(csv_bytes, media_type="text/csv", headers=headers)
+
+# ✅ alias do export, se seu JS chamar isso
+@app.get("/historico_pagamentos/exportar")
+def exportar_historico_alias(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+):
+    return exportar_historico(request=request, db=db, transportadora=transportadora)
