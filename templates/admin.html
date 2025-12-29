@@ -21,11 +21,13 @@
     table{width:100%;border-collapse:collapse}
     th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;font-size:14px}
     th{color:#94a3b8;font-size:12px;text-transform:uppercase}
+    .msg{margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.25);display:none}
+    .err{margin-top:10px;padding:10px 12px;border-radius:10px;font-size:13px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);display:none}
   </style>
 </head>
 <body>
 <header>
-  <div><b>Admin</b> — {{ admin.username }}</div>
+  <div><b>Admin</b> — {{ username }}</div>
   <div class="row">
     <a href="/">Voltar</a>
     <a href="/logout">Sair</a>
@@ -36,15 +38,10 @@
 
   <section class="card">
     <h2>Criar usuário</h2>
-    <form method="post" action="/admin/user/create" class="grid">
-      <input type="hidden" name="csrf" value="{{ csrf }}" />
+    <form method="post" action="/admin/users/criar" class="grid">
       <div>
         <label>Username</label>
         <input name="username" required />
-      </div>
-      <div>
-        <label>E-mail (opcional)</label>
-        <input name="email" />
       </div>
       <div>
         <label>Perfil</label>
@@ -53,8 +50,8 @@
           <option value="admin">admin</option>
         </select>
       </div>
-      <div>
-        <label>Senha temporária</label>
+      <div style="grid-column:1/-1">
+        <label>Senha temporária (mínimo 10)</label>
         <input name="temp_password" required />
       </div>
       <div style="grid-column:1/-1">
@@ -62,65 +59,168 @@
       </div>
     </form>
     <p style="color:#94a3b8;font-size:13px;margin:10px 0 0">
-      Dica: a senha temporária força troca no primeiro login (expira imediatamente).
+      Dica: a senha temporária força troca no primeiro login.
     </p>
   </section>
 
   <section class="card">
     <h2>Cadastrar transportadora</h2>
-    <form method="post" action="/admin/transportadora/create" class="row">
-      <input type="hidden" name="csrf" value="{{ csrf }}" />
-      <input name="nome" placeholder="Ex: DHL" required />
-      <button class="btn" type="submit">Cadastrar</button>
-    </form>
+    <div class="grid">
+      <div>
+        <label>Nome</label>
+        <input id="trNome" placeholder="Ex: DHL" />
+      </div>
+      <div>
+        <label>Responsável</label>
+        <input id="trResp" placeholder="Ex: Gabrielly" />
+      </div>
+      <div style="grid-column:1/-1" class="row">
+        <button class="btn" type="button" id="btnCriarTr">Cadastrar</button>
+        <div class="msg" id="msgOk">OK</div>
+        <div class="err" id="msgErr">Erro</div>
+      </div>
+    </div>
   </section>
 
   <section class="card">
-    <h2>Responsável por transportadora</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Transportadora</th>
-          <th>Responsável atual</th>
-          <th>Alterar</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for tr in trs %}
-        <tr>
-          <td>{{ tr.nome }}</td>
-          <td>
-            {% if tr.responsavel_user_id %}
-              {{ user_map.get(tr.responsavel_user_id, '-') }}
-            {% else %}
-              -
-            {% endif %}
-          </td>
-          <td>
-            <form method="post" action="/admin/transportadora/assign" class="row">
-              <input type="hidden" name="csrf" value="{{ csrf }}" />
-              <input type="hidden" name="transportadora_id" value="{{ tr.id }}" />
-              <select name="responsavel_user_id">
-                <option value="">(Sem responsável)</option>
-                {% for u in users %}
-                  <option value="{{ u.id }}" {% if tr.responsavel_user_id == u.id %}selected{% endif %}>
-                    {{ u.username }} ({{ u.role }})
-                  </option>
-                {% endfor %}
-              </select>
-              <button class="btn" type="submit">Salvar</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <h2>Transportadoras cadastradas</h2>
+    <div class="row" style="justify-content:space-between">
+      <div style="color:#94a3b8;font-size:13px">Aqui você altera o responsável e ativa/desativa.</div>
+      <button class="btn" type="button" id="btnReload">Recarregar</button>
+    </div>
 
-    <p style="color:#94a3b8;font-size:13px;margin:10px 0 0">
-      Se uma transportadora não estiver cadastrada aqui, o sistema ainda usa seu RESP_MAP antigo (não quebra nada).
-    </p>
+    <div style="margin-top:10px;overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Responsável</th>
+            <th>Ativa</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="tbodyTr"></tbody>
+      </table>
+    </div>
   </section>
 
 </main>
+
+<script>
+  const tbody = document.getElementById("tbodyTr");
+  const msgOk = document.getElementById("msgOk");
+  const msgErr = document.getElementById("msgErr");
+
+  function showOk(text){
+    msgErr.style.display="none";
+    msgOk.textContent = text || "OK";
+    msgOk.style.display="block";
+    setTimeout(()=>msgOk.style.display="none", 2500);
+  }
+  function showErr(text){
+    msgOk.style.display="none";
+    msgErr.textContent = text || "Erro";
+    msgErr.style.display="block";
+    setTimeout(()=>msgErr.style.display="none", 3500);
+  }
+
+  async function carregarTransportadoras(){
+    tbody.innerHTML = `<tr><td colspan="4" style="color:#94a3b8">Carregando...</td></tr>`;
+    try{
+      const resp = await fetch("/admin/transportadoras");
+      if(!resp.ok) throw new Error("Falha ao listar");
+      const data = await resp.json();
+
+      if(!Array.isArray(data) || data.length===0){
+        tbody.innerHTML = `<tr><td colspan="4" style="color:#94a3b8">Nenhuma cadastrada.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = "";
+      data.forEach((t)=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${t.nome}</td>
+          <td><input data-field="responsavel" value="${t.responsavel ?? ""}" /></td>
+          <td>
+            <select data-field="ativa">
+              <option value="true" ${t.ativa ? "selected":""}>Sim</option>
+              <option value="false" ${!t.ativa ? "selected":""}>Não</option>
+            </select>
+          </td>
+          <td>
+            <button class="btn" data-acao="salvar">Salvar</button>
+          </td>
+        `;
+        tr.dataset.id = t.id;
+        tbody.appendChild(tr);
+      });
+    }catch(e){
+      console.error(e);
+      tbody.innerHTML = `<tr><td colspan="4" style="color:#94a3b8">Erro ao carregar.</td></tr>`;
+    }
+  }
+
+  async function criarTransportadora(){
+    const nome = (document.getElementById("trNome").value || "").trim();
+    const responsavel = (document.getElementById("trResp").value || "").trim();
+    if(!nome) return showErr("Nome obrigatório.");
+
+    try{
+      const resp = await fetch("/admin/transportadoras", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({nome, responsavel: responsavel || null})
+      });
+      if(!resp.ok){
+        const txt = await resp.text();
+        throw new Error(txt || "Falha ao criar");
+      }
+      document.getElementById("trNome").value = "";
+      document.getElementById("trResp").value = "";
+      showOk("Transportadora cadastrada!");
+      await carregarTransportadoras();
+    }catch(e){
+      console.error(e);
+      showErr("Não foi possível cadastrar.");
+    }
+  }
+
+  async function salvarLinha(tr){
+    const id = tr.dataset.id;
+    const respInput = tr.querySelector('[data-field="responsavel"]');
+    const ativaSel = tr.querySelector('[data-field="ativa"]');
+    const responsavel = (respInput.value || "").trim();
+    const ativa = ativaSel.value === "true";
+
+    try{
+      const resp = await fetch(`/admin/transportadoras/${id}`, {
+        method: "PUT",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({responsavel: responsavel || null, ativa})
+      });
+      if(!resp.ok){
+        const txt = await resp.text();
+        throw new Error(txt || "Falha ao salvar");
+      }
+      showOk("Salvo!");
+    }catch(e){
+      console.error(e);
+      showErr("Erro ao salvar.");
+    }
+  }
+
+  document.getElementById("btnCriarTr").addEventListener("click", criarTransportadora);
+  document.getElementById("btnReload").addEventListener("click", carregarTransportadoras);
+
+  tbody.addEventListener("click", (e)=>{
+    const btn = e.target.closest("button[data-acao='salvar']");
+    if(!btn) return;
+    const tr = btn.closest("tr");
+    if(tr) salvarLinha(tr);
+  });
+
+  carregarTransportadoras();
+</script>
 </body>
 </html>
