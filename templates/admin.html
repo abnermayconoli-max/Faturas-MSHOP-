@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin - Faturas MSHOP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{margin:0;font-family:system-ui;background:#0b1220;color:#e5e7eb}
+    header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.08);background:#0f1a2e}
+    a{color:#93c5fd;text-decoration:none} a:hover{text-decoration:underline}
+    .container{max-width:1100px;margin:18px auto;padding:0 16px;display:grid;gap:14px}
+    .card{background:#0f1a2e;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px}
+    h2{margin:0 0 10px;font-size:18px}
+    label{display:block;margin:10px 0 6px;font-size:13px;color:#cbd5e1}
+    input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0b1426;color:#e5e7eb;outline:none}
+    .btn{padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#1f6feb;color:white;font-weight:700;cursor:pointer}
+    .btn:hover{filter:brightness(1.05)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .row{display:flex;gap:10px;align-items:center}
+    .row .btn{white-space:nowrap}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;font-size:14px}
+    th{color:#94a3b8;font-size:12px;text-transform:uppercase}
+  </style>
+</head>
+<body>
+<header>
+  <div><b>Admin</b> — {{ admin.username }}</div>
+  <div class="row">
+    <a href="/">Voltar</a>
+    <a href="/logout">Sair</a>
+  </div>
+</header>
+
+<main class="container">
+
+  <section class="card">
+    <h2>Criar usuário</h2>
+    <form method="post" action="/admin/user/create" class="grid">
+      <input type="hidden" name="csrf" value="{{ csrf }}" />
+      <div>
+        <label>Username</label>
+        <input name="username" required />
+      </div>
+      <div>
+        <label>E-mail (opcional)</label>
+        <input name="email" />
+      </div>
+      <div>
+        <label>Perfil</label>
+        <select name="role">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <div>
+        <label>Senha temporária</label>
+        <input name="temp_password" required />
+      </div>
+      <div style="grid-column:1/-1">
+        <button class="btn" type="submit">Criar</button>
+      </div>
+    </form>
+    <p style="color:#94a3b8;font-size:13px;margin:10px 0 0">
+      Dica: a senha temporária força troca no primeiro login (expira imediatamente).
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Cadastrar transportadora</h2>
+    <form method="post" action="/admin/transportadora/create" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}" />
+      <input name="nome" placeholder="Ex: DHL" required />
+      <button class="btn" type="submit">Cadastrar</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Responsável por transportadora</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Transportadora</th>
+          <th>Responsável atual</th>
+          <th>Alterar</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for tr in trs %}
+        <tr>
+          <td>{{ tr.nome }}</td>
+          <td>
+            {% if tr.responsavel_user_id %}
+              {{ user_map.get(tr.responsavel_user_id, '-') }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            <form method="post" action="/admin/transportadora/assign" class="row">
+              <input type="hidden" name="csrf" value="{{ csrf }}" />
+              <input type="hidden" name="transportadora_id" value="{{ tr.id }}" />
+              <select name="responsavel_user_id">
+                <option value="">(Sem responsável)</option>
+                {% for u in users %}
+                  <option value="{{ u.id }}" {% if tr.responsavel_user_id == u.id %}selected{% endif %}>
+                    {{ u.username }} ({{ u.role }})
+                  </option>
+                {% endfor %}
+              </select>
+              <button class="btn" type="submit">Salvar</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+
+    <p style="color:#94a3b8;font-size:13px;margin:10px 0 0">
+      Se uma transportadora não estiver cadastrada aqui, o sistema ainda usa seu RESP_MAP antigo (não quebra nada).
+    </p>
+  </section>
+
+</main>
+</body>
+</html>
