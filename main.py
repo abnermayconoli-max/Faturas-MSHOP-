@@ -78,12 +78,13 @@ def pick_tpl(*candidates: str) -> str:
             return c
     return candidates[0]
 
-TPL_LOGIN  = pick_tpl("login.html")
-TPL_INDEX  = pick_tpl("index.html")
-TPL_ADMIN  = pick_tpl("admin.html")
-TPL_CHANGE = pick_tpl("change.html", "alterar_senha.html", "change_password.html")
-TPL_FORGOT = pick_tpl("forgot.html", "esqueci.html")
-TPL_RESET  = pick_tpl("reset.html")
+TPL_LOGIN   = pick_tpl("login.html")
+TPL_INDEX   = pick_tpl("index.html")
+TPL_ADMIN   = pick_tpl("admin.html")
+TPL_CHANGE  = pick_tpl("change.html", "alterar_senha.html", "change_password.html")
+TPL_FORGOT  = pick_tpl("forgot.html", "esqueci.html")
+TPL_RESET   = pick_tpl("reset.html")
+TPL_PROFILE = pick_tpl("profile.html", "perfil.html")  # ✅ NOVO
 
 # =========================
 # CONFIG AUTH / SEGURANÇA
@@ -111,16 +112,13 @@ BOOTSTRAP_ADMIN_USER = os.getenv("BOOTSTRAP_ADMIN_USER", "").strip()
 BOOTSTRAP_ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
 BOOTSTRAP_ADMIN_EMAIL = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip() or None
 
-# Cookies seguros no HTTPS.
-# No Render é HTTPS, então secure=True ok.
-# Se você testar local com HTTP, deixe DEBUG=1 pra secure=False.
 COOKIE_SECURE = False if DEBUG else True
 
 # =========================
 # ✅ PERFORMANCE: throttle do status automático
 # =========================
-# Evita rodar UPDATE pesado em toda navegação (isso deixa o site lento no Render Free).
-STATUS_UPDATE_MIN_SECONDS = int(os.getenv("STATUS_UPDATE_MIN_SECONDS", "120"))  # 2 min padrão
+
+STATUS_UPDATE_MIN_SECONDS = int(os.getenv("STATUS_UPDATE_MIN_SECONDS", "120"))
 _last_status_update_ts: float = 0.0
 
 def should_run_status_update() -> bool:
@@ -203,8 +201,8 @@ class AnexoDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     fatura_id = Column(Integer, ForeignKey("faturas.id", ondelete="CASCADE"))
-    filename = Column(String)       # KEY do R2
-    original_name = Column(String)  # nome original
+    filename = Column(String)
+    original_name = Column(String)
     content_type = Column(String)
     criado_em = Column(Date, default=date.today)
 
@@ -297,14 +295,6 @@ def ensure_schema():
             );
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_historico_pagamentos_fatura_id ON historico_pagamentos(fatura_id);"))
-        try:
-            conn.execute(text("""
-                ALTER TABLE historico_pagamentos
-                ALTER COLUMN pago_em TYPE TIMESTAMPTZ
-                USING (pago_em AT TIME ZONE 'UTC');
-            """))
-        except Exception as e:
-            print("WARN schema: alter historico_pagamentos.pago_em -> timestamptz:", repr(e))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
@@ -316,10 +306,8 @@ def ensure_schema():
 
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';"))
-
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_salt TEXT;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_hash TEXT;"))
-
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 1;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_password_changed_at TIMESTAMPTZ;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_password_changed_at TIMESTAMPTZ;"))
@@ -369,15 +357,7 @@ def get_responsavel_fallback(transportadora: str) -> Optional[str]:
     base = transportadora.split("-")[0].strip()
     return RESP_MAP.get(base)
 
-# =========================
-# ✅ PERFORMANCE: cache de responsáveis (evita N+1)
-# =========================
-
 def build_responsavel_cache(db: Session) -> Dict[str, str]:
-    """
-    Retorna um dict: { 'DHL': 'userX', 'Garcia': 'userY', ... }
-    A chave é o nome-base da transportadora (antes do "-").
-    """
     cache: Dict[str, str] = {}
     try:
         rows = (
@@ -523,7 +503,6 @@ def get_session_csrf(request: Request) -> Optional[str]:
     return payload.get("csrf")
 
 def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
-    # ✅ melhora: se o HTML não mandar csrf, tenta usar o cookie (evita 400 “campo obrigatório”)
     if not csrf_form_value:
         csrf_form_value = request.cookies.get(CSRF_COOKIE)
 
@@ -536,7 +515,6 @@ def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
     if not csrf_cookie:
         return False
 
-    # Se ainda não existe sessão (primeiro acesso), valida pelo cookie.
     if not csrf_session:
         return hmac.compare_digest(csrf_form_value, csrf_cookie)
 
@@ -604,11 +582,9 @@ def get_responsavel(db: Session, transportadora: str, cache: Optional[Dict[str, 
     nome_base = transportadora.split("-")[0].strip()
     key = nome_base.lower()
 
-    # ✅ usa cache (mais rápido)
     if cache is not None and key in cache:
         return cache[key]
 
-    # fallback: busca normal
     tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
     if tr and tr.responsavel_user_id:
         u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
@@ -639,7 +615,6 @@ def quarta_da_semana_atual(hoje: date) -> date:
     return monday + timedelta(days=2)
 
 def atualizar_status_automatico(db: Session):
-    # ✅ PERFORMANCE: roda no máximo a cada STATUS_UPDATE_MIN_SECONDS
     if not should_run_status_update():
         return
 
@@ -693,7 +668,7 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="2.0.3")
+app = FastAPI(title="Sistema de Faturas", version="2.0.4")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -719,7 +694,7 @@ def bootstrap_admin(db: Session):
             pwd_salt=salt,
             pwd_hash=pwd_hash,
             must_change_password=1,
-            password_expires_at=now,  # força troca
+            password_expires_at=now,
             created_at=now,
         )
         db.add(user)
@@ -744,6 +719,22 @@ def on_startup():
         bootstrap_admin(db)
     finally:
         db.close()
+
+# =========================
+# HELPERS DE PÁGINA
+# =========================
+
+def redirect_to_login(next_path: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
+
+def require_page_auth(request: Request, db: Session) -> UserDB:
+    user = get_current_user(request, db)
+    if not user:
+        raise HTTPException(status_code=401)
+    if needs_password_change(user):
+        # força trocar senha antes de navegar
+        raise HTTPException(status_code=403)
+    return user
 
 # =========================
 # AUTH ROUTES / PAGES
@@ -910,7 +901,6 @@ def forgot_action(
     if not user and val:
         user = db.query(UserDB).filter(UserDB.email == val).first()
 
-    # msg genérica
     if not user:
         return templates.TemplateResponse(
             TPL_FORGOT,
@@ -1005,9 +995,6 @@ def reset_action(
 # PAGES PROTEGIDAS (HTML)
 # =========================
 
-def redirect_to_login(next_path: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
-
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
@@ -1017,7 +1004,58 @@ def home(request: Request, db: Session = Depends(get_db)):
     if needs_password_change(user):
         return RedirectResponse(url="/change-password", status_code=302)
 
-    return templates.TemplateResponse(TPL_INDEX, {"request": request})
+    # ✅ manda user para o template (pra você poder mostrar Perfil / Sair / Admin no menu)
+    return templates.TemplateResponse(
+        TPL_INDEX,
+        {"request": request, "user": user, "is_admin": (user.role or "").lower() == "admin"},
+    )
+
+@app.get("/perfil", response_class=HTMLResponse)
+def perfil_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user(request, db)
+    if not user:
+        return redirect_to_login("/perfil")
+    if needs_password_change(user):
+        return RedirectResponse(url="/change-password", status_code=302)
+
+    csrf_cookie = request.cookies.get(CSRF_COOKIE)
+    csrf = csrf_cookie or make_csrf_token()
+
+    is_admin = (user.role or "").lower() == "admin"
+
+    users = []
+    trs = []
+    user_map = {}
+    if is_admin:
+        users = db.query(UserDB).order_by(UserDB.username.asc()).all()
+        trs = db.query(TransportadoraDB).order_by(TransportadoraDB.nome.asc()).all()
+        user_map = {u.id: u.username for u in users}
+
+    resp = templates.TemplateResponse(
+        TPL_PROFILE,
+        {
+            "request": request,
+            "user": user,
+            "is_admin": is_admin,
+            "csrf": csrf,
+            "users": users,
+            "trs": trs,
+            "user_map": user_map,
+        },
+    )
+
+    if not csrf_cookie:
+        resp.set_cookie(
+            CSRF_COOKIE,
+            csrf,
+            max_age=CSRF_MAX_AGE_SECONDS,
+            httponly=False,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            path="/",
+        )
+
+    return resp
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
@@ -1060,15 +1098,15 @@ def admin_create_user(
     if (admin.role or "").lower() != "admin":
         return RedirectResponse(url="/", status_code=302)
     if not validate_csrf(request, csrf):
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)  # ✅ volta pro perfil
 
     username = username.strip()
     if not username:
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)
 
     exists = db.query(UserDB).filter(UserDB.username == username).first()
     if exists:
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)
 
     salt, pwd_hash = hash_password(temp_password)
 
@@ -1084,7 +1122,7 @@ def admin_create_user(
     )
     db.add(u)
     db.commit()
-    return RedirectResponse(url="/admin", status_code=302)
+    return RedirectResponse(url="/perfil", status_code=302)
 
 @app.post("/admin/transportadora/create", response_class=HTMLResponse)
 def admin_create_transportadora(
@@ -1099,18 +1137,18 @@ def admin_create_transportadora(
     if (admin.role or "").lower() != "admin":
         return RedirectResponse(url="/", status_code=302)
     if not validate_csrf(request, csrf):
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)
 
     nome = nome.strip()
     if not nome:
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)
 
     exists = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome)).first()
     if not exists:
         db.add(TransportadoraDB(nome=nome))
         db.commit()
 
-    return RedirectResponse(url="/admin", status_code=302)
+    return RedirectResponse(url="/perfil", status_code=302)
 
 @app.post("/admin/transportadora/assign", response_class=HTMLResponse)
 def admin_assign_transportadora(
@@ -1126,11 +1164,11 @@ def admin_assign_transportadora(
     if (admin.role or "").lower() != "admin":
         return RedirectResponse(url="/", status_code=302)
     if not validate_csrf(request, csrf):
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)
 
     tr = db.query(TransportadoraDB).filter(TransportadoraDB.id == transportadora_id).first()
     if not tr:
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/perfil", status_code=302)
 
     if responsavel_user_id.strip() == "":
         tr.responsavel_user_id = None
@@ -1144,7 +1182,7 @@ def admin_assign_transportadora(
             pass
 
     db.commit()
-    return RedirectResponse(url="/admin", status_code=302)
+    return RedirectResponse(url="/perfil", status_code=302)
 
 # =========================
 # HEALTH
@@ -1158,6 +1196,7 @@ def health_check():
         "templates_dir": TEMPLATES_DIR,
         "debug": DEBUG,
         "status_update_min_seconds": STATUS_UPDATE_MIN_SECONDS,
+        "has_profile_template": True,
     }
 
 # =========================
@@ -1186,28 +1225,21 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
     )
 
     if (fatura.status or "").lower() == "pago":
-        # busca responsável (pode ser 1 query só, ok)
         resp_nome = get_responsavel(db, db_fatura.transportadora, cache=None)
         registrar_pagamento(db, db_fatura, resp_nome)
 
     db.add(db_fatura)
     db.commit()
     db.refresh(db_fatura)
-
-    # ✅ aqui dá pra usar cache vazio (só para retorno)
     return fatura_to_out(db, db_fatura, cache=None)
-
-# =========================
-# HISTÓRICO (API)
-# =========================
 
 @app.get("/historico", response_model=List[HistoricoPagamentoOut])
 def listar_historico(
     request: Request,
     db: Session = Depends(get_db),
     transportadora: Optional[str] = Query(None),
-    de: Optional[str] = Query(None),   # yyyy-mm-dd
-    ate: Optional[str] = Query(None),  # yyyy-mm-dd
+    de: Optional[str] = Query(None),
+    ate: Optional[str] = Query(None),
     numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
@@ -1247,8 +1279,6 @@ def listar_faturas(
     numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
-
-    # ✅ PERFORMANCE: roda status automático com throttle
     atualizar_status_automatico(db)
 
     query = db.query(FaturaDB)
@@ -1274,10 +1304,7 @@ def listar_faturas(
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
     faturas_db = query.order_by(FaturaDB.id).all()
-
-    # ✅ PERFORMANCE: cache de responsáveis em 1 query (evita N+1)
     cache = build_responsavel_cache(db)
-
     return [fatura_to_out(db, f, cache=cache) for f in faturas_db]
 
 @app.put("/faturas/{fatura_id}", response_model=FaturaOut)
@@ -1306,7 +1333,6 @@ def atualizar_fatura(fatura_id: int, dados: FaturaUpdate, request: Request, db: 
 
     db.commit()
     db.refresh(fatura)
-
     cache = build_responsavel_cache(db)
     return fatura_to_out(db, fatura, cache=cache)
 
@@ -1442,8 +1468,6 @@ def resumo_dashboard(
     de_vencimento: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
-
-    # ✅ throttle aqui também
     atualizar_status_automatico(db)
 
     hoje = hoje_local_br()
@@ -1520,8 +1544,6 @@ def exportar_faturas(
     numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
-
-    # ✅ throttle
     atualizar_status_automatico(db)
 
     import csv
@@ -1534,8 +1556,6 @@ def exportar_faturas(
         query = query.filter(FaturaDB.numero_fatura.ilike(f"%{numero_fatura}%"))
 
     faturas = query.order_by(FaturaDB.id).all()
-
-    # ✅ cache responsável (evita N+1 também aqui)
     cache = build_responsavel_cache(db)
 
     output = io.StringIO()
