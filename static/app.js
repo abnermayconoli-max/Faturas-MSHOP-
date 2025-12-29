@@ -69,7 +69,7 @@ async function apiFetch(url, options = {}) {
 
   if (resp.status === 401) {
     alert("Sessão expirada. Faça login novamente.");
-    window.location.href = "/"; // se tiver página de login separada, mude aqui
+    window.location.href = "/login";
     throw new Error("401 não autenticado");
   }
   return resp;
@@ -88,7 +88,8 @@ async function carregarMe() {
     const role = document.getElementById("perfilRole");
     const status = document.getElementById("perfilStatus");
 
-    if (nome) nome.textContent = currentUser.nome || "-";
+    // seu backend retorna username, não nome
+    if (nome) nome.textContent = currentUser.username || "-";
     if (email) email.textContent = currentUser.email || "-";
     if (role) role.textContent = (currentUser.role || "-").toUpperCase();
     if (status) status.textContent = "Logado";
@@ -104,109 +105,14 @@ async function carregarMe() {
   }
 }
 
-async function logout() {
-  try {
-    const resp = await apiFetch(`${API_BASE}/auth/logout`, { method: "POST" });
-    if (!resp.ok) throw new Error("Erro ao deslogar");
-    alert("Você saiu da conta.");
-    window.location.href = "/";
-  } catch (err) {
-    console.error(err);
-    alert("Erro ao deslogar");
-  }
+function logout() {
+  // seu backend tem GET /logout (não existe /auth/logout POST)
+  window.location.href = "/logout";
 }
 
-// Admin: criar user
-async function adminCriarUsuario() {
-  const nome = document.getElementById("adminNovoUsuarioNome")?.value?.trim() || "";
-  const email = document.getElementById("adminNovoUsuarioEmail")?.value?.trim() || "";
-  const senha = document.getElementById("adminNovoUsuarioSenha")?.value || "";
-  const role = document.getElementById("adminNovoUsuarioRole")?.value || "user";
-
-  if (!nome || !email || !senha) {
-    alert("Preencha nome, email e senha.");
-    return;
-  }
-
-  try {
-    const resp = await apiFetch(
-      `${API_BASE}/admin/users?nome=${encodeURIComponent(nome)}&email=${encodeURIComponent(
-        email
-      )}&senha=${encodeURIComponent(senha)}&role=${encodeURIComponent(role)}`,
-      { method: "POST" }
-    );
-    const j = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(j?.detail || "Erro ao criar usuário");
-
-    alert("Usuário cadastrado com sucesso!");
-    document.getElementById("adminNovoUsuarioNome").value = "";
-    document.getElementById("adminNovoUsuarioEmail").value = "";
-    document.getElementById("adminNovoUsuarioSenha").value = "";
-    document.getElementById("adminNovoUsuarioRole").value = "user";
-  } catch (err) {
-    console.error(err);
-    alert(String(err.message || err));
-  }
-}
-
-// Admin: add transportadora
-async function adminAddTransportadora() {
-  const nome = document.getElementById("adminNovaTransportadora")?.value?.trim() || "";
-  const responsavel = document.getElementById("adminNovoResponsavel")?.value?.trim() || "";
-
-  if (!nome) {
-    alert("Informe a transportadora.");
-    return;
-  }
-
-  try {
-    const url = `${API_BASE}/admin/transportadoras?nome=${encodeURIComponent(nome)}&responsavel=${encodeURIComponent(
-      responsavel
-    )}`;
-
-    const resp = await apiFetch(url, { method: "POST" });
-    const j = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(j?.detail || "Erro ao adicionar transportadora");
-
-    alert("Transportadora adicionada!");
-    document.getElementById("adminNovaTransportadora").value = "";
-    document.getElementById("adminNovoResponsavel").value = "";
-  } catch (err) {
-    console.error(err);
-    alert(String(err.message || err));
-  }
-}
-
-// Admin: alterar responsável
-async function adminAlterarResponsavel() {
-  const nome = document.getElementById("adminAlterarTransportadora")?.value?.trim() || "";
-  const responsavel = document.getElementById("adminAlterarResponsavel")?.value?.trim() || "";
-
-  if (!nome || !responsavel) {
-    alert("Preencha transportadora e novo responsável.");
-    return;
-  }
-
-  try {
-    const url = `${API_BASE}/admin/transportadoras/responsavel?nome_transportadora=${encodeURIComponent(
-      nome
-    )}&responsavel=${encodeURIComponent(responsavel)}`;
-
-    const resp = await apiFetch(url, { method: "PUT" });
-    const j = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(j?.detail || "Erro ao alterar responsável");
-
-    alert("Responsável alterado!");
-    document.getElementById("adminAlterarTransportadora").value = "";
-    document.getElementById("adminAlterarResponsavel").value = "";
-
-    // recarrega listas
-    await carregarFaturas();
-    await carregarDashboard();
-  } catch (err) {
-    console.error(err);
-    alert(String(err.message || err));
-  }
+// botão admin (abre a página /admin que já existe no backend)
+function abrirAdmin() {
+  window.location.href = "/admin";
 }
 
 // ============ DASHBOARD ============
@@ -277,7 +183,8 @@ async function carregarDashboard() {
       ultimaListaFaturas = lista;
     }
 
-    if (dashboardModo ===_toggleis = "pago") {
+    // ✅ CORREÇÃO DO BUG QUE QUEBRAVA TODO O JS
+    if (dashboardModo === "pago") {
       renderResumoDashboardPago(lista);
     } else {
       renderResumoDashboardPendente(lista);
@@ -959,6 +866,8 @@ function preencherFormularioEdicao(f) {
 async function abrirModalAnexos(faturaId) {
   document.getElementById("modalFaturaId").textContent = faturaId;
   const lista = document.getElementById("listaAnexos");
+  if (!lista) return;
+
   lista.innerHTML = "Carregando...";
 
   try {
@@ -1012,7 +921,7 @@ async function abrirModalAnexos(faturaId) {
     lista.innerHTML = "<li>Erro ao carregar anexos.</li>";
   }
 
-  document.getElementById("modalAnexos").classList.add("open");
+  document.getElementById("modalAnexos")?.classList.add("open");
 }
 
 // ============ FORMULÁRIO ============
@@ -1021,7 +930,7 @@ async function salvarFatura(e) {
   e.preventDefault();
 
   const form = document.getElementById("formFatura");
-  const editId = form.dataset.editId || null;
+  const editId = form?.dataset?.editId || null;
 
   const payload = {
     transportadora: document.getElementById("inputTransportadora").value,
@@ -1087,7 +996,7 @@ async function salvarFatura(e) {
     }
 
     form.reset();
-    delete form.dataset.editId;
+    if (form?.dataset?.editId) delete form.dataset.editId;
 
     await carregarFaturas();
     await carregarHistorico();
@@ -1117,22 +1026,24 @@ function ativarAba(aba) {
   [tabDash, tabCad, tabFat, tabHist, tabPerfil].forEach((t) => t && t.classList.remove("active"));
 
   if (aba === "dashboard") {
-    dash.classList.add("visible");
-    tabDash.classList.add("active");
+    dash?.classList.add("visible");
+    tabDash?.classList.add("active");
+    carregarDashboard();
   } else if (aba === "cadastro") {
-    cad.classList.add("visible");
-    tabCad.classList.add("active");
+    cad?.classList.add("visible");
+    tabCad?.classList.add("active");
   } else if (aba === "historico") {
-    hist.classList.add("visible");
-    tabHist.classList.add("active");
+    hist?.classList.add("visible");
+    tabHist?.classList.add("active");
     carregarHistorico();
   } else if (aba === "perfil") {
-    perfil.classList.add("visible");
-    tabPerfil.classList.add("active");
+    perfil?.classList.add("visible");
+    tabPerfil?.classList.add("active");
     carregarMe();
   } else {
-    fat.classList.add("visible");
-    tabFat.classList.add("active");
+    fat?.classList.add("visible");
+    tabFat?.classList.add("active");
+    carregarFaturas();
   }
 }
 
@@ -1329,10 +1240,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Admin buttons no perfil
-  document.getElementById("btnAdminCriarUsuario")?.addEventListener("click", adminCriarUsuario);
-  document.getElementById("btnAdminAddTransportadora")?.addEventListener("click", adminAddTransportadora);
-  document.getElementById("btnAdminAlterarResponsavel")?.addEventListener("click", adminAlterarResponsavel);
+  // ✅ Admin: como seu backend é por página HTML, abre /admin
+  document.getElementById("btnAdminCriarUsuario")?.addEventListener("click", abrirAdmin);
+  document.getElementById("btnAdminAddTransportadora")?.addEventListener("click", abrirAdmin);
+  document.getElementById("btnAdminAlterarResponsavel")?.addEventListener("click", abrirAdmin);
 
   // primeira carga
   await carregarMe();
