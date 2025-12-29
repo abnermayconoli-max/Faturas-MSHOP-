@@ -1124,7 +1124,47 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
         status=fatura.status,
         observacao=fatura.observacao,
     )
+# =========================
+# HISTÓRICO (API)
+# =========================
 
+@app.get("/historico", response_model=List[HistoricoPagamentoOut])
+def listar_historico(
+    request: Request,
+    db: Session = Depends(get_db),
+    transportadora: Optional[str] = Query(None),
+    de: Optional[str] = Query(None),   # yyyy-mm-dd
+    ate: Optional[str] = Query(None),  # yyyy-mm-dd
+    numero_fatura: Optional[str] = Query(None),
+):
+    api_require_auth(request, db)
+
+    q = db.query(HistoricoPagamentoDB)
+
+    if transportadora:
+        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
+
+    if numero_fatura:
+        q = q.filter(HistoricoPagamentoDB.numero_fatura.ilike(f"%{numero_fatura}%"))
+
+    if de:
+        try:
+            d1 = datetime.strptime(de, "%Y-%m-%d").date()
+            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) >= d1)
+        except ValueError:
+            pass
+
+    if ate:
+        try:
+            d2 = datetime.strptime(ate, "%Y-%m-%d").date()
+            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) <= d2)
+        except ValueError:
+            pass
+
+    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
+    return itens
+
+    
     if (fatura.status or "").lower() == "pago":
         resp_nome = get_responsavel(db, db_fatura.transportadora)
         registrar_pagamento(db, db_fatura, resp_nome)
