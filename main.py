@@ -8,7 +8,7 @@ import hashlib
 import secrets
 from typing import List, Optional, Tuple
 
-from zoneinfo import ZoneInfo  # ✅ fuso
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     FastAPI,
@@ -62,28 +62,22 @@ Base = declarative_base()
 # CONFIG AUTH / SEGURANÇA
 # =========================
 
-# Cookie de sessão assinado (HMAC) + CSRF por cookie
 SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("JWT_SECRET")
 if not SESSION_SECRET:
-    # ✅ não derruba o app com RuntimeError (pra você não ficar travado no Render)
-    # mas recomenda MUITO setar no Render
     print("WARN: SESSION_SECRET/JWT_SECRET não configurado. Configure no Render para login funcionar com segurança.")
     SESSION_SECRET = "DEV_ONLY_CHANGE_ME"
 
 COOKIE_NAME = "mshop_session"
 CSRF_COOKIE = "mshop_csrf"
-COOKIE_MAX_AGE_SECONDS = 60 * 60 * 12  # 12 horas
+COOKIE_MAX_AGE_SECONDS = 60 * 60 * 12
 CSRF_MAX_AGE_SECONDS = 60 * 60 * 12
 
-# Senha: PBKDF2 (stdlib)
 PBKDF2_ITERS = int(os.getenv("PBKDF2_ITERS", "260000"))
 HASH_ALGO = "sha256"
 
-# Expiração de senha
 PWD_EXP_FIRST_DAYS = 90
 PWD_EXP_NEXT_DAYS = 180
 
-# Bootstrap do primeiro admin via env
 BOOTSTRAP_ADMIN_USER = os.getenv("BOOTSTRAP_ADMIN_USER", "").strip()
 BOOTSTRAP_ADMIN_PASSWORD = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
 BOOTSTRAP_ADMIN_EMAIL = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip() or None
@@ -190,14 +184,14 @@ class UserDB(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=False, index=False, nullable=True)
+    email = Column(String, nullable=True)
 
-    role = Column(String, default="user")  # "admin" | "user"
+    role = Column(String, default="user")  # admin/user
 
     pwd_salt = Column(String, nullable=False)
     pwd_hash = Column(String, nullable=False)
 
-    must_change_password = Column(Integer, default=1)  # 1/0
+    must_change_password = Column(Integer, default=1)
     first_password_changed_at = Column(DateTime(timezone=True), nullable=True)
     last_password_changed_at = Column(DateTime(timezone=True), nullable=True)
     password_expires_at = Column(DateTime(timezone=True), nullable=True)
@@ -223,7 +217,7 @@ class PasswordResetDB(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
 
-# cria tabelas (básico)
+# cria tabelas novas (as que não existirem)
 Base.metadata.create_all(bind=engine)
 
 # =========================
@@ -266,24 +260,28 @@ def ensure_schema():
         except Exception as e:
             print("WARN schema: alter historico_pagamentos.pago_em -> timestamptz:", repr(e))
 
-        # --- users ---
+        # --- users (TABELA PODE EXISTIR, ENTÃO MIGRA POR COLUNAS) ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT,
-                role TEXT DEFAULT 'user',
-                pwd_salt TEXT NOT NULL,
-                pwd_hash TEXT NOT NULL,
-                must_change_password INTEGER DEFAULT 1,
-                first_password_changed_at TIMESTAMPTZ,
-                last_password_changed_at TIMESTAMPTZ,
-                password_expires_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                last_login_at TIMESTAMPTZ
+                username TEXT UNIQUE NOT NULL
             );
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_username ON users(username);"))
+
+        # ✅ adiciona colunas novas, mesmo que a tabela já exista antiga
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';"))
+
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_salt TEXT;"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_hash TEXT;"))
+
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 1;"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_password_changed_at TIMESTAMPTZ;"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_password_changed_at TIMESTAMPTZ;"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_expires_at TIMESTAMPTZ;"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;"))
 
         # --- transportadoras ---
         conn.execute(text("""
@@ -375,7 +373,10 @@ def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
     )
     return salt, _b64url(dk)
 
-def verify_password(password: str, salt: str, pwd_hash: str) -> bool:
+def verify_password(password: str, salt: Optional[str], pwd_hash: Optional[str]) -> bool:
+    # ✅ se usuário antigo existir sem salt/hash, não quebra
+    if not salt or not pwd_hash:
+        return False
     _, calc = hash_password(password, salt=salt)
     return hmac.compare_digest(calc, pwd_hash)
 
@@ -410,7 +411,7 @@ def set_auth_cookies(resp: Response, user_id: int):
         sess,
         max_age=COOKIE_MAX_AGE_SECONDS,
         httponly=True,
-        secure=True,      # ✅ HTTPS only (Render)
+        secure=True,
         samesite="lax",
         path="/",
     )
@@ -418,7 +419,7 @@ def set_auth_cookies(resp: Response, user_id: int):
         CSRF_COOKIE,
         csrf,
         max_age=CSRF_MAX_AGE_SECONDS,
-        httponly=False,   # ✅ precisa ler no template/form
+        httponly=False,
         secure=True,
         samesite="lax",
         path="/",
@@ -455,7 +456,6 @@ def get_session_csrf(request: Request) -> Optional[str]:
     return payload.get("csrf")
 
 def validate_csrf(request: Request, csrf_form_value: Optional[str]) -> bool:
-    # ✅ evita 422: trata aqui
     if not csrf_form_value:
         return False
     csrf_cookie = request.cookies.get(CSRF_COOKIE)
@@ -520,7 +520,6 @@ class HistoricoPagamentoOut(BaseModel):
 # =========================
 
 def get_responsavel(db: Session, transportadora: str) -> Optional[str]:
-    # ✅ primeiro tenta ADMIN (tabela transportadoras)
     if transportadora:
         nome_base = transportadora.split("-")[0].strip()
         tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
@@ -528,7 +527,6 @@ def get_responsavel(db: Session, transportadora: str) -> Optional[str]:
             u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
             if u:
                 return u.username
-    # fallback antigo
     return get_responsavel_fallback(transportadora)
 
 def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
@@ -603,7 +601,7 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="2.0.0")
+app = FastAPI(title="Sistema de Faturas", version="2.0.1")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -616,24 +614,37 @@ def bootstrap_admin(db: Session):
     if not BOOTSTRAP_ADMIN_USER or not BOOTSTRAP_ADMIN_PASSWORD:
         return
 
-    existing = db.query(UserDB).filter(UserDB.username == BOOTSTRAP_ADMIN_USER).first()
-    if existing:
-        return
+    user = db.query(UserDB).filter(UserDB.username == BOOTSTRAP_ADMIN_USER).first()
 
     salt, pwd_hash = hash_password(BOOTSTRAP_ADMIN_PASSWORD)
-    user = UserDB(
-        username=BOOTSTRAP_ADMIN_USER,
-        email=BOOTSTRAP_ADMIN_EMAIL,
-        role="admin",
-        pwd_salt=salt,
-        pwd_hash=pwd_hash,
-        must_change_password=1,  # força trocar no primeiro login
-        password_expires_at=agora_br(),  # expira imediatamente
-        created_at=agora_br(),
-    )
-    db.add(user)
-    db.commit()
-    print(f"BOOTSTRAP: admin criado: {BOOTSTRAP_ADMIN_USER}")
+    now = agora_br()
+
+    if not user:
+        user = UserDB(
+            username=BOOTSTRAP_ADMIN_USER,
+            email=BOOTSTRAP_ADMIN_EMAIL,
+            role="admin",
+            pwd_salt=salt,
+            pwd_hash=pwd_hash,
+            must_change_password=1,
+            password_expires_at=now,  # força troca
+            created_at=now,
+        )
+        db.add(user)
+        db.commit()
+        print(f"BOOTSTRAP: admin criado: {BOOTSTRAP_ADMIN_USER}")
+        return
+
+    # ✅ se já existe (tabela antiga), mas está sem salt/hash, corrige e promove pra admin
+    if not getattr(user, "pwd_salt", None) or not getattr(user, "pwd_hash", None):
+        user.pwd_salt = salt
+        user.pwd_hash = pwd_hash
+        user.role = "admin"
+        user.email = user.email or BOOTSTRAP_ADMIN_EMAIL
+        user.must_change_password = 1
+        user.password_expires_at = now
+        db.commit()
+        print(f"BOOTSTRAP: admin EXISTENTE corrigido/atualizado: {BOOTSTRAP_ADMIN_USER}")
 
 @app.on_event("startup")
 def on_startup():
@@ -649,7 +660,6 @@ def on_startup():
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, next: str = "/"):
-    # csrf = cookie ou gera um se não tiver
     csrf_cookie = request.cookies.get(CSRF_COOKIE)
     csrf = csrf_cookie or make_csrf_token()
 
@@ -676,7 +686,6 @@ def login_action(
     db: Session = Depends(get_db),
 ):
     if not validate_csrf(request, csrf):
-        # volta pra tela com mensagem (sem 422)
         csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
         resp = templates.TemplateResponse(
             "login.html",
@@ -688,7 +697,7 @@ def login_action(
         return resp
 
     user = db.query(UserDB).filter(UserDB.username == username.strip()).first()
-    if not user or not verify_password(password, user.pwd_salt, user.pwd_hash):
+    if not user or not verify_password(password, getattr(user, "pwd_salt", None), getattr(user, "pwd_hash", None)):
         csrf_cookie = request.cookies.get(CSRF_COOKIE) or make_csrf_token()
         resp = templates.TemplateResponse(
             "login.html",
@@ -702,14 +711,11 @@ def login_action(
     user.last_login_at = agora_br()
     db.commit()
 
-    # Se precisa trocar senha: manda para change-password
     if needs_password_change(user):
         resp = RedirectResponse(url="/change-password", status_code=302)
         set_auth_cookies(resp, user.id)
         return resp
 
-    # normal
-    # Se clicar "Admin" no login.html, ele manda next=/admin. Só vai funcionar se role=admin
     resp = RedirectResponse(url=next or "/", status_code=302)
     set_auth_cookies(resp, user.id)
     return resp
@@ -719,21 +725,6 @@ def logout():
     resp = RedirectResponse(url="/login", status_code=302)
     clear_auth_cookies(resp)
     return resp
-
-def require_login(request: Request, db: Session) -> UserDB:
-    u = get_current_user(request, db)
-    if not u:
-        raise HTTPException(status_code=401, detail="Não autenticado")
-    # força troca se necessário
-    if needs_password_change(u) and request.url.path not in ["/change-password", "/logout"]:
-        raise HTTPException(status_code=403, detail="Troca de senha necessária")
-    return u
-
-def require_admin(request: Request, db: Session) -> UserDB:
-    u = require_login(request, db)
-    if (u.role or "").lower() != "admin":
-        raise HTTPException(status_code=403, detail="Sem permissão")
-    return u
 
 @app.get("/change-password", response_class=HTMLResponse)
 def change_password_page(request: Request, db: Session = Depends(get_db)):
@@ -768,14 +759,13 @@ def change_password_action(
             status_code=400,
         )
 
-    if not verify_password(current_password, user.pwd_salt, user.pwd_hash):
+    if not verify_password(current_password, getattr(user, "pwd_salt", None), getattr(user, "pwd_hash", None)):
         return templates.TemplateResponse(
             "change.html",
             {"request": request, "csrf": csrf, "error": "Senha atual incorreta."},
             status_code=400,
         )
 
-    # regras mínimas de senha (pode reforçar depois)
     if len(new_password) < 8:
         return templates.TemplateResponse(
             "change.html",
@@ -783,12 +773,10 @@ def change_password_action(
             status_code=400,
         )
 
-    # troca
     salt, pwd_hash = hash_password(new_password)
     user.pwd_salt = salt
     user.pwd_hash = pwd_hash
 
-    # primeira troca após temp?
     is_first = user.first_password_changed_at is None
     now = agora_br()
 
@@ -800,7 +788,6 @@ def change_password_action(
     user.password_expires_at = compute_expiry(is_first_after_temp=is_first)
 
     db.commit()
-
     return RedirectResponse(url="/", status_code=302)
 
 @app.get("/forgot", response_class=HTMLResponse)
@@ -832,7 +819,6 @@ def forgot_action(
     if not user and val:
         user = db.query(UserDB).filter(UserDB.email == val).first()
 
-    # sempre responde “ok” pra não vazar usuários
     if not user:
         return templates.TemplateResponse(
             "forgot.html",
@@ -861,8 +847,6 @@ def forgot_action(
 
 @app.get("/reset", response_class=HTMLResponse)
 def reset_page(request: Request, token: str):
-    # página simples dentro do change.html? vamos reutilizar change.html? (não)
-    # manter simples: manda pro change-password se logado
     csrf_cookie = request.cookies.get(CSRF_COOKIE)
     csrf = csrf_cookie or make_csrf_token()
 
@@ -929,7 +913,7 @@ def reset_action(
     return RedirectResponse(url="/login", status_code=302)
 
 # =========================
-# PROTEÇÃO DE ROTAS HTML
+# PAGES PROTEGIDAS (HTML)
 # =========================
 
 def redirect_to_login(next_path: str) -> RedirectResponse:
@@ -1013,7 +997,7 @@ def admin_create_user(
         pwd_salt=salt,
         pwd_hash=pwd_hash,
         must_change_password=1,
-        password_expires_at=agora_br(),  # expira imediatamente => força troca no 1º login
+        password_expires_at=agora_br(),
         created_at=agora_br(),
     )
     db.add(u)
@@ -1103,28 +1087,24 @@ def api_require_auth(request: Request, db: Session):
 @app.post("/faturas", response_model=FaturaOut)
 def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(get_db)):
     api_require_auth(request, db)
-    try:
-        db_fatura = FaturaDB(
-            transportadora=fatura.transportadora,
-            numero_fatura=fatura.numero_fatura,
-            valor=fatura.valor,
-            data_vencimento=fatura.data_vencimento,
-            status=fatura.status,
-            observacao=fatura.observacao,
-        )
 
-        # se já cria como pago, registra
-        if (fatura.status or "").lower() == "pago":
-            resp_nome = get_responsavel(db, db_fatura.transportadora)
-            registrar_pagamento(db, db_fatura, resp_nome)
+    db_fatura = FaturaDB(
+        transportadora=fatura.transportadora,
+        numero_fatura=fatura.numero_fatura,
+        valor=fatura.valor,
+        data_vencimento=fatura.data_vencimento,
+        status=fatura.status,
+        observacao=fatura.observacao,
+    )
 
-        db.add(db_fatura)
-        db.commit()
-        db.refresh(db_fatura)
-        return fatura_to_out(db, db_fatura)
-    except Exception as e:
-        print("ERRO AO CRIAR FATURA:", repr(e))
-        raise HTTPException(status_code=400, detail="Erro ao criar fatura")
+    if (fatura.status or "").lower() == "pago":
+        resp_nome = get_responsavel(db, db_fatura.transportadora)
+        registrar_pagamento(db, db_fatura, resp_nome)
+
+    db.add(db_fatura)
+    db.commit()
+    db.refresh(db_fatura)
+    return fatura_to_out(db, db_fatura)
 
 @app.get("/faturas", response_model=List[FaturaOut])
 def listar_faturas(
@@ -1136,7 +1116,6 @@ def listar_faturas(
     numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
-
     atualizar_status_automatico(db)
 
     query = db.query(FaturaDB)
@@ -1324,7 +1303,6 @@ def resumo_dashboard(
     de_vencimento: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
-
     atualizar_status_automatico(db)
 
     hoje = hoje_local_br()
@@ -1390,54 +1368,6 @@ def resumo_dashboard(
     }
 
 # =========================
-# HISTÓRICO (API)
-# =========================
-
-@app.get("/historico_pagamentos", response_model=List[HistoricoPagamentoOut])
-def listar_historico_pagamentos(
-    request: Request,
-    db: Session = Depends(get_db),
-    transportadora: Optional[str] = Query(None),
-    de: Optional[str] = Query(None),
-    ate: Optional[str] = Query(None),
-):
-    api_require_auth(request, db)
-
-    q = db.query(HistoricoPagamentoDB)
-
-    if transportadora:
-        q = q.filter(HistoricoPagamentoDB.transportadora.ilike(f"%{transportadora}%"))
-
-    if de:
-        try:
-            dt = datetime.strptime(de, "%Y-%m-%d").date()
-            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) >= dt)
-        except ValueError:
-            pass
-
-    if ate:
-        try:
-            dt = datetime.strptime(ate, "%Y-%m-%d").date()
-            q = q.filter(func.date(HistoricoPagamentoDB.pago_em) <= dt)
-        except ValueError:
-            pass
-
-    itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
-    return [
-        HistoricoPagamentoOut(
-            id=i.id,
-            fatura_id=i.fatura_id,
-            pago_em=i.pago_em,
-            transportadora=i.transportadora,
-            responsavel=i.responsavel,
-            numero_fatura=i.numero_fatura,
-            valor=float(i.valor or 0),
-            data_vencimento=i.data_vencimento,
-        )
-        for i in itens
-    ]
-
-# =========================
 # EXPORT CSV
 # =========================
 
@@ -1449,7 +1379,6 @@ def exportar_faturas(
     numero_fatura: Optional[str] = Query(None),
 ):
     api_require_auth(request, db)
-
     atualizar_status_automatico(db)
 
     import csv
