@@ -214,6 +214,7 @@ class UserDB(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+)
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, nullable=True)
 
@@ -256,12 +257,11 @@ Base.metadata.create_all(bind=engine)
 
 def ensure_schema():
     with engine.begin() as conn:
-        # --- faturas: garante colunas em bancos antigos (✅ CORREÇÃO DO 500) ---
+        # --- faturas: garante colunas ---
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS transportadora TEXT;"))
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS numero_fatura TEXT;"))
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pendente';"))
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS observacao TEXT;"))
-
         conn.execute(text("ALTER TABLE faturas ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMPTZ;"))
         try:
             conn.execute(text("""
@@ -306,10 +306,8 @@ def ensure_schema():
 
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';"))
-
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_salt TEXT;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pwd_hash TEXT;"))
-
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 1;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_password_changed_at TIMESTAMPTZ;"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_password_changed_at TIMESTAMPTZ;"))
@@ -317,15 +315,34 @@ def ensure_schema():
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;"))
 
-        # --- transportadoras ---
+        # --- transportadoras (✅ CORREÇÃO DO SEU ERRO) ---
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS transportadoras (
                 id SERIAL PRIMARY KEY,
-                nome TEXT UNIQUE NOT NULL,
-                responsavel_user_id INTEGER REFERENCES users(id)
+                nome TEXT UNIQUE NOT NULL
             );
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_transportadoras_nome ON transportadoras(nome);"))
+
+        # garante a coluna que estava faltando
+        conn.execute(text("ALTER TABLE transportadoras ADD COLUMN IF NOT EXISTS responsavel_user_id INTEGER;"))
+        try:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conname = 'transportadoras_responsavel_user_id_fkey'
+                    ) THEN
+                        ALTER TABLE transportadoras
+                        ADD CONSTRAINT transportadoras_responsavel_user_id_fkey
+                        FOREIGN KEY (responsavel_user_id) REFERENCES users(id);
+                    END IF;
+                END$$;
+            """))
+        except Exception as e:
+            print("WARN schema: add FK transportadoras.responsavel_user_id:", repr(e))
 
         # --- password_resets ---
         conn.execute(text("""
@@ -562,13 +579,22 @@ class HistoricoPagamentoOut(BaseModel):
 # =========================
 
 def get_responsavel(db: Session, transportadora: str) -> Optional[str]:
+    """
+    ✅ Defesa extra: se a coluna ainda não existir por algum motivo, não derruba o /faturas.
+    """
     if transportadora:
         nome_base = transportadora.split("-")[0].strip()
-        tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
-        if tr and tr.responsavel_user_id:
+        try:
+            tr = db.query(TransportadoraDB).filter(TransportadoraDB.nome.ilike(nome_base)).first()
+        except Exception as e:
+            print("WARN get_responsavel: erro ao consultar transportadoras (schema antigo?):", repr(e))
+            return get_responsavel_fallback(transportadora)
+
+        if tr and getattr(tr, "responsavel_user_id", None):
             u = db.query(UserDB).filter(UserDB.id == tr.responsavel_user_id).first()
             if u:
                 return u.username
+
     return get_responsavel_fallback(transportadora)
 
 def fatura_to_out(db: Session, f: FaturaDB) -> FaturaOut:
@@ -643,7 +669,7 @@ def get_db():
 # APP / STATIC / TEMPLATES
 # =========================
 
-app = FastAPI(title="Sistema de Faturas", version="2.0.3")
+app = FastAPI(title="Sistema de Faturas", version="2.0.4")
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -1144,7 +1170,6 @@ def criar_fatura(fatura: FaturaCreate, request: Request, db: Session = Depends(g
 # HISTÓRICO (API)
 # =========================
 
-# ✅ (NOVO) endpoint que o app.js está chamando: /historico_pagamentos
 @app.get("/historico_pagamentos", response_model=List[HistoricoPagamentoOut])
 def listar_historico_pagamentos(
     request: Request,
@@ -1181,7 +1206,6 @@ def listar_historico_pagamentos(
     itens = q.order_by(HistoricoPagamentoDB.pago_em.desc()).all()
     return itens
 
-# (mantém o antigo também, para compatibilidade)
 @app.get("/historico", response_model=List[HistoricoPagamentoOut])
 def listar_historico(
     request: Request,
